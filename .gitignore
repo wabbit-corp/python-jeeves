@@ -1,0 +1,10 @@
+# Python gitignore
+*.pyc
+*.pyo
+*.pyd
+__pycache__/
+.mypy_cache/
+/.private.clj
+
+cache.db
+all_memes.json
