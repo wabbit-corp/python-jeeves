@@ -8,6 +8,7 @@ from collections import OrderedDict
 
 from clj.types import SExpr, SAtom, SStr, SGroup, SSeq, SMap
 
+
 @dataclass
 class ExecutionContext:
     env: Dict[str, Any] = dataclasses.field(default_factory=dict)
@@ -23,11 +24,14 @@ class ExecutionContext:
         name = name or fn.__name__
         self.env[name] = fn
 
-Quoted = NewType('Quoted', SExpr)
+
+Quoted = NewType("Quoted", SExpr)
+
 
 @dataclass
 class NativeFunction:
     fn: typing.Callable
+
     def __call__(self, ctx: ExecutionContext, *args: Any) -> Any:
         evaluated = [eval_sexpr(ctx, x) for x in args]
         return self.fn(*evaluated)
@@ -39,13 +43,14 @@ def eval_sexpr(ctx: ExecutionContext, e: SExpr | List[SExpr]) -> Any:
 
     match e:
         case SAtom(a):
-            if a.startswith('py.'):
+            if a.startswith("py."):
                 a = a[3:]
-                module, attr = a.rsplit('/', 1)
+                module, attr = a.rsplit("/", 1)
                 import importlib
+
                 module_obj = importlib.import_module(module)
                 result = getattr(module_obj, attr)
-                if hasattr(result, '__call__'):
+                if hasattr(result, "__call__"):
                     return NativeFunction(result)
                 return result
 
@@ -68,4 +73,3 @@ def eval_sexpr(ctx: ExecutionContext, e: SExpr | List[SExpr]) -> Any:
             fn = eval_sexpr(ctx, g[0])
             args = g[1:]
             return fn(ctx, *args)
-
