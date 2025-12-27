@@ -7,19 +7,28 @@ from pathlib import Path
 import logging
 from collections import defaultdict
 from openai import AsyncOpenAI
+from asyncio import AbstractEventLoop
 
 _LOGGER = logging.getLogger(__name__)
 
 
 AsyncToolCallback = Callable[["GlobalContext", JSON], Awaitable[Any]]
 
-SECRET_OPENAI_KEY = "openai-key"
-SECRET_USER_AGENT = "user-agent"
-SECRET_DISCORD_TOKEN = "discord-token"
-SECRET_IMGFLIP_USERNAME = "imgflip-username"
-SECRET_IMGFLIP_PASSWORD = "imgflip-password"
-SECRET_BRAVE_KEY = "brave-key"
+SECRET_OPENAI_KEY       = "openai.key"
+SECRET_USER_AGENT       = "web.user-agent"
+SECRET_DISCORD_TOKEN    = "discord.token"
+SECRET_IMGFLIP_USERNAME = "imgflip.username"
+SECRET_IMGFLIP_PASSWORD = "imgflip.password"
+SECRET_BRAVE_KEY        = "brave.key"
 
+ALL_SECRETS = [
+    SECRET_OPENAI_KEY,
+    SECRET_USER_AGENT,
+    SECRET_DISCORD_TOKEN,
+    SECRET_IMGFLIP_USERNAME,
+    SECRET_IMGFLIP_PASSWORD,
+    SECRET_BRAVE_KEY,
+]
 
 @dataclass
 class ToolDef:
@@ -41,6 +50,15 @@ class RoutineTask:
     run_every_seconds: int
     function: AsyncToolCallback
 
+@dataclass
+class RoutineTaskState:
+    name: str
+    description: str
+    run_every_seconds: int
+    function: AsyncToolCallback
+    last_run_timestamp: float = 0.0
+    run_count: int = 0
+
 
 @dataclass
 class Module:
@@ -48,7 +66,10 @@ class Module:
     module_prompt: str | None = None
     tools: Dict[str, ToolDef] = field(default_factory=dict)
     personalities: Dict[str, Personality] = field(default_factory=dict)
-    routine_tasks: Dict[str, RoutineTask] = field(default_factory=dict)
+    routine_tasks: Dict[str, RoutineTaskState] = field(default_factory=dict)
+
+
+DiscordSendFn = Callable[[str, str], Awaitable[None]]
 
 
 @dataclass
@@ -60,6 +81,10 @@ class GlobalContext:
         default_factory=lambda: defaultdict(list)
     )
     channel_personality: Dict[str, Personality] = field(default_factory=dict)
+
+    send_discord_message: DiscordSendFn = None  # type: ignore
+
+    discord_loop: AbstractEventLoop = None  # type: ignore
 
 
 def discover_modules() -> Dict[str, Module]:
@@ -111,7 +136,12 @@ def discover_modules() -> Dict[str, Module]:
                         modules[module_name] = Module(
                             name=module_name, module_prompt=module_prompt
                         )
-                    modules[module_name].routine_tasks[attr.name] = attr
+                    modules[module_name].routine_tasks[attr.name] = RoutineTaskState(
+                        name=attr.name,
+                        description=attr.description,
+                        run_every_seconds=attr.run_every_seconds,
+                        function=attr.function,
+                    )
 
             if module_name not in modules and module_prompt is not None:
                 modules[module_name] = Module(

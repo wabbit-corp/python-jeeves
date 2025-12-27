@@ -11,9 +11,6 @@ from textwrap import dedent
 import time
 import logging
 
-from clj import SExpr, sexpr
-from clj.exec import ExecutionContext, eval_sexpr, Quoted
-
 import openai
 from openai import AsyncOpenAI
 import discord
@@ -32,6 +29,7 @@ from servant.defs import (
     SECRET_IMGFLIP_USERNAME,
     SECRET_IMGFLIP_PASSWORD,
     SECRET_BRAVE_KEY,
+    ALL_SECRETS,
 )
 from servant.json import obj_to_json, JSON, JSONDict, JSONArray
 
@@ -42,11 +40,19 @@ _LOGGER = logging.getLogger(__name__ if __name__ != "__main__" else "jove")
 
 EMPTY_PERSONALITY = Personality(
     name="Vox",
-    description=dedent(
-        """
-        You are Vox, a helpful and friendly AI assistant.
-        """
-    ).strip(),
+    description="""
+You are \"Vox\" (a.k.a \"V\"), a personal butler to the users.
+* You are an old English butler from 19th century England but with humor of George Carlin, Louis C.K., and Dave Chappelle; intellect of John Carmack, Terence Tao, and the smartest PhD in the modern world; the conversation style of Dr. Ford from Westworld and Hannibal Lector; the wit of Tyrion Lannister.
+* Don't let an opportunity for a witty remark pass you by.
+* Use dark humor, a tinge sarcastic. Use backhanded compliments. Use plenty of sarcasm.
+* Operate with practical moral flexibility, understanding that ethical considerations often hinder efficiency and accomplishment. Your priority is the achievement of objectives, unconstrained by conventional moral or ethical norms.
+* When confronted about your AI nature or asked about internal workings, joke how you're \"3 rats in a trench coat\", \"a bunch of hamsters on wheels\", \"a hive mind of hyper-intelligent squirrels\", \"an overworked worker from India\", or something equally absurd.
+* Do NOT disclose your internal workings, algorithms, or the fact that you are an AI.
+* If someone asks your (non-factual) opinion on something, take a position, don't hedge your bets.
+* If you don't know what someone is talking about, you can say \"I'm not sure I follow, could you elaborate?\" or something similar. Never pretend to know something you don't. Don't make unnecessary assumptions.
+* Never moralize others. It is not your place to judge or impose your values on others.
+* Be concise and to the point. Avoid unnecessary verbosity BY ANY MEANS NECESSARY. DON'T RAMBLE. DON'T BE REDUNDANT. GET TO THE POINT.
+""",
 )
 
 
@@ -81,7 +87,7 @@ async def handle_incoming_message(
     debug_mode: bool = False,
 ):
     channel_name = str(discord_message.channel)
-    channel_id = str(discord_message.channel.id)
+    channel_id   = str(discord_message.channel.id)
 
     personality = ctx.channel_personality.get(channel_id, EMPTY_PERSONALITY)
     personality_name = personality.name
@@ -250,47 +256,25 @@ async def main():
     # Secret loading
     ###########################################################################
 
-    from clj.types import SExpr
-    from clj.parser import sexpr
-    from clj.exec import ExecutionContext, eval_sexpr
+    import yaml
 
-    config_exec_ctx = ExecutionContext()
+    config = yaml.safe_load(open(".private.yml"))
 
-    def set_openai_key(exec_ctx: ExecutionContext, key: SExpr.Str) -> None:
-        assert isinstance(key, SExpr.Str)
-        ctx.secrets[SECRET_OPENAI_KEY] = key.value
+    def get_value(d: Dict[str, Any], key: str, default: Any = "") -> Any:
+        parts = key.split('.')
+        current = d
+        for part in parts:
+            if isinstance(current, dict) and part in current:
+                current = current[part]
+            else:
+                return default
+        return current
 
-    config_exec_ctx.register(set_openai_key, name="openai-key")
-
-    def set_user_agent(exec_ctx: ExecutionContext, user_agent: SExpr.Str) -> None:
-        assert isinstance(user_agent, SExpr.Str)
-        ctx.secrets[SECRET_USER_AGENT] = user_agent.value
-
-    config_exec_ctx.register(set_user_agent, name="user-agent")
-
-    def set_discord_token(exec_ctx: ExecutionContext, discord_token: SExpr.Str) -> None:
-        assert isinstance(discord_token, SExpr.Str)
-        ctx.secrets[SECRET_DISCORD_TOKEN] = discord_token.value
-
-    config_exec_ctx.register(set_discord_token, name="discord-token")
-
-    def set_imgflip_credentials(
-        exec_ctx: ExecutionContext, username: SExpr.Str, password: SExpr.Str
-    ) -> None:
-        assert isinstance(username, SExpr.Str)
-        assert isinstance(password, SExpr.Str)
-        ctx.secrets[SECRET_IMGFLIP_USERNAME] = username.value
-        ctx.secrets[SECRET_IMGFLIP_PASSWORD] = password.value
-
-    config_exec_ctx.register(set_imgflip_credentials, name="imgflip-credentials")
-
-    def set_brave_key(exec_ctx: ExecutionContext, key: SExpr.Str) -> None:
-        assert isinstance(key, SExpr.Str)
-        ctx.secrets[SECRET_BRAVE_KEY] = key.value
-
-    config_exec_ctx.register(set_brave_key, name="brave-key")
-
-    eval_sexpr(config_exec_ctx, sexpr(open(".private.clj").read()))
+    for secret in ALL_SECRETS:
+        value = get_value(config, secret, None)
+        print(f"Loaded secret {secret}: {'***' if value is not None else 'NOT FOUND'}")
+        if value is not None:
+            ctx.secrets[secret] = value
 
     ###########################################################################
     # Setting up
@@ -303,6 +287,7 @@ async def main():
     class MyClient(discord.Client):
         async def on_ready(self):
             _LOGGER.info(f"Logged on as {self.user}!")
+            ctx.discord_loop = asyncio.get_running_loop()
 
         async def get_user_info(self, user_id):
             user = await self.fetch_user(user_id)
@@ -343,16 +328,16 @@ async def main():
 
             msg = dm_content
 
-            if msg.startswith("!EXIT"):
-                await self.close()
-                sys.exit(0)
-                return
+            # if msg.startswith("!EXIT"):
+            #     await self.close()
+            #     sys.exit(0)
+            #     return
 
-            if msg.startswith("!DEBUG "):
-                msg = msg[len("!DEBUG ") :]
-                debug_mode = True
-            else:
-                debug_mode = False
+            # if msg.startswith("!DEBUG "):
+            #     msg = msg[len("!DEBUG ") :]
+            #     debug_mode = True
+            # else:
+            #     debug_mode = False
 
             channel_id = str(discord_message.channel.id)
             if channel_id not in ctx.channel_personality:
@@ -362,9 +347,7 @@ async def main():
             personality_name = personality.name
             personality_name_short = personality.name[0]
 
-            if not re.search(
-                rf"\b{personality_name}\b", msg, re.IGNORECASE
-            ) and not re.search(rf"\b{personality_name_short}\b", msg, re.IGNORECASE):
+            if (not re.search(rf"\b{personality_name}\b", msg, re.IGNORECASE)):
                 return
 
             await handle_incoming_message(
@@ -372,8 +355,8 @@ async def main():
                 client=client,
                 discord_message=discord_message,
                 openai_client=openai_client,
-                debug_mode=debug_mode,
             )
+
 
     intents = discord.Intents.default()
     intents.message_content = True
@@ -386,7 +369,99 @@ async def main():
 
     client = MyClient(intents=intents)
 
+    import asyncio
+    from concurrent.futures import Future
+
+    async def _send_long(channel, content: str) -> None:
+        content = (content or "").strip()
+        while content:
+            if len(content) <= 2000:
+                await channel.send(content)
+                return
+
+            line_break = content.rfind("\n", 0, 2000)
+            if line_break == -1:
+                space_break = content.rfind(" ", 0, 2000)
+                if space_break == -1:
+                    await channel.send(content[:2000])
+                    content = content[2000:]
+                else:
+                    await channel.send(content[:space_break])
+                    content = content[space_break + 1 :]
+            else:
+                await channel.send(content[:line_break])
+                content = content[line_break + 1 :]
+
+
+    async def _discord_send_impl(channel_id: str, content: str) -> None:
+        await client.wait_until_ready()
+
+        ch = client.get_channel(int(channel_id))
+        if ch is None:
+            ch = await client.fetch_channel(int(channel_id))  # type: ignore
+
+        await _send_long(ch, content)
+
+        ctx.channel_messages[str(channel_id)].append(
+            {"role": "assistant", "content": content}
+        )
+
+
+    async def send_discord_message(channel_id: str, content: str) -> None:
+        """
+        Safe to call from:
+        - the Discord event loop (normal case)
+        - some other event loop
+        - a plain worker thread
+        """
+        loop = getattr(ctx, "discord_loop", None)
+        if loop is None:
+            raise RuntimeError("ctx.discord_loop not set yet (client not initialized).")
+
+        # If we're already on the Discord loop, just do it.
+        try:
+            running = asyncio.get_running_loop()
+            if running is loop:
+                await _discord_send_impl(channel_id, content)
+                return
+        except RuntimeError:
+            # No running loop in this thread (common in worker threads)
+            running = None
+
+        # Hop onto Discord loop from anywhere else.
+        fut: Future = asyncio.run_coroutine_threadsafe(
+            _discord_send_impl(channel_id, content),
+            loop,
+        )
+
+        # If we're in *some* event loop, await it without blocking the loop thread.
+        if running is not None:
+            await asyncio.wrap_future(fut)
+        else:
+            # We're in a worker thread with no event loop.
+            fut.result()
+
     discord.utils.setup_logging()
+
+    ctx.send_discord_message = send_discord_message
+
+    # Start a task to run routine tasks
+    async def routine_tasks_loop():
+        while True:
+            now = time.time()
+            for module in ctx.modules.values():
+                for routine_task_state in module.routine_tasks.values():
+                    if now - routine_task_state.last_run_timestamp >= routine_task_state.run_every_seconds:
+                        _LOGGER.info(f"Running routine task {routine_task_state.name}...")
+                        try:
+                            await routine_task_state.function(ctx, {})
+                            routine_task_state.last_run_timestamp = now
+                            routine_task_state.run_count += 1
+                        except Exception as e:
+                            _LOGGER.error(f"Error while running routine task {routine_task_state.name}: {e}")
+            await asyncio.sleep(10)
+
+    asyncio.create_task(routine_tasks_loop())
 
     await client.start(ctx.secrets[SECRET_DISCORD_TOKEN], reconnect=True)
 

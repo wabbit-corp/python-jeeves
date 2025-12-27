@@ -131,19 +131,6 @@ async def _with_db(ctx: GlobalContext, fn):
     return await asyncio.to_thread(_run)
 
 
-# ----------------------------
-# Messaging hook
-# ----------------------------
-
-async def send_channel_message(ctx: GlobalContext, channel_id: str, content: str) -> None:
-    """
-    Replace this with your actual Discord send call.
-    For now, it queues into ctx.channel_messages[channel_id].
-    """
-    ctx.channel_messages[channel_id].append(
-        {"type": "bot_message", "content": content, "ts": _now_iso()}
-    )
-
 
 def _mention(user_id: str) -> str:
     # Discord mention format
@@ -361,6 +348,7 @@ commitment_manage_tool: ToolDef = ToolDef(
 # ----------------------------
 
 def _should_checkin(today: dt.date, last_checkin: Optional[str], interval_days: int) -> bool:
+    # return True
     if not last_checkin:
         return True
     try:
@@ -374,6 +362,8 @@ async def commitment_checkin_task(ctx: GlobalContext, _obj: JSON) -> JSONDict:
     """
     Runs periodically. For each channel, pings users who have commitments due for check-in.
     """
+    # print("commitment_checkin_task running...")
+
     today = dt.date.today()
     today_s = today.isoformat()
     now = _now_iso()
@@ -393,17 +383,20 @@ async def commitment_checkin_task(ctx: GlobalContext, _obj: JSON) -> JSONDict:
         rows = conn.execute(
             """
             SELECT * FROM commitments
-            WHERE status = 'active' AND start_date <= ? AND end_date >= ?
+            WHERE status = 'active' AND ((start_date <= ? AND end_date >= ?) OR 1 = 1)
             ORDER BY channel_id, user_id, id
             """,
             (today_s, today_s),
         ).fetchall()
+
+        # print(f"Found {len(rows)} active commitments.")
 
         due_by_channel: Dict[str, List[Commitment]] = {}
         due_ids: List[int] = []
 
         for r in rows:
             c = _row_to_commitment(r)
+            # print(c)
             if _should_checkin(today, c.last_checkin_date, c.interval_days):
                 due_by_channel.setdefault(c.channel_id, []).append(c)
                 due_ids.append(c.id)
@@ -417,9 +410,7 @@ async def commitment_checkin_task(ctx: GlobalContext, _obj: JSON) -> JSONDict:
 
             mentioned = " ".join(_mention(uid) for uid in sorted(by_user.keys()))
             lines: List[str] = []
-            lines.append(f"Progress check-in time (every {DEFAULT_INTERVAL_DAYS} days, because discipline is a myth).")
-            lines.append(f"{mentioned}")
-            lines.append("")
+            lines.append(f"Progress check-in time.")
 
             for uid in sorted(by_user.keys()):
                 lines.append(f"{_mention(uid)}")
@@ -429,7 +420,7 @@ async def commitment_checkin_task(ctx: GlobalContext, _obj: JSON) -> JSONDict:
 
             lines.append("Reply with: what you did, what’s blocked, and what you’ll do next.")
 
-            await send_channel_message(ctx, channel_id, "\n".join(lines).strip())
+            await ctx.send_discord_message(channel_id, "\n".join(lines).strip())
 
         # 4) Mark last_checkin_date for what we pinged
         if due_ids:
@@ -454,6 +445,6 @@ async def commitment_checkin_task(ctx: GlobalContext, _obj: JSON) -> JSONDict:
 commitment_checkin_routine: RoutineTask = RoutineTask(
     name="commitment_checkin",
     description=f"Every so often, asks users about commitment progress (interval {DEFAULT_INTERVAL_DAYS} days).",
-    run_every_seconds=60 * 60,  # hourly; actual gating is per-commitment interval_days
+    run_every_seconds=60,  # hourly; actual gating is per-commitment interval_days
     function=lambda ctx, obj: commitment_checkin_task(ctx, obj),
 )
