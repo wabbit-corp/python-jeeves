@@ -20,6 +20,7 @@ SECRET_DISCORD_TOKEN    = "discord.token"
 SECRET_IMGFLIP_USERNAME = "imgflip.username"
 SECRET_IMGFLIP_PASSWORD = "imgflip.password"
 SECRET_BRAVE_KEY        = "brave.key"
+SECRET_GITHUB_TOKEN     = "github.token"
 
 ALL_SECRETS = [
     SECRET_OPENAI_KEY,
@@ -28,6 +29,7 @@ ALL_SECRETS = [
     SECRET_IMGFLIP_USERNAME,
     SECRET_IMGFLIP_PASSWORD,
     SECRET_BRAVE_KEY,
+    SECRET_GITHUB_TOKEN,
 ]
 
 @dataclass

@@ -4,7 +4,8 @@
 *.pyd
 __pycache__/
 .mypy_cache/
-/.private.clj
+/.private.yml
+/servant_commitments.sqlite3
 
 cache.db
 all_memes.json
