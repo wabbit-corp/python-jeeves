@@ -15,20 +15,6 @@ from servant.secrets import SECRET_GITHUB_TOKEN  # type: ignore
 _REPO_FULL_NAME = "wabbit-corp/python-jeeves"
 
 
-def _get_token(ctx: Any) -> str:
-    try:
-        token = ctx.secrets[SECRET_GITHUB_TOKEN]
-    except Exception as e:
-        raise ValueError(
-            f"Missing GitHub token in ctx.secrets[{SECRET_GITHUB_TOKEN!r}]"
-        ) from e
-
-    if not isinstance(token, str) or not token.strip():
-        raise ValueError("GitHub token is empty/invalid in ctx.secrets.")
-
-    return token.strip()
-
-
 def _normalize_title(prefix: str, name: str) -> str:
     name = (name or "").strip()
     if not name:
@@ -91,7 +77,7 @@ def _create_issue_sync(token: str, title: str, body: str, label_names: List[str]
 
 
 async def file_bug_report(name: str, description: str = "", *, ctx: Any) -> JSONDict:
-    token = _get_token(ctx)
+    token = ctx.secrets[SECRET_GITHUB_TOKEN].strip()
     title = _normalize_title("Bug", name)
     body = _build_body("Bug Report", description)
 
@@ -100,7 +86,7 @@ async def file_bug_report(name: str, description: str = "", *, ctx: Any) -> JSON
 
 
 async def file_feature_request(name: str, description: str = "", *, ctx: Any) -> JSONDict:
-    token = _get_token(ctx)
+    token = ctx.secrets[SECRET_GITHUB_TOKEN].strip()
     title = _normalize_title("Feature", name)
     body = _build_body("Feature Request", description)
 
