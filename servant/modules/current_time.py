@@ -31,7 +31,8 @@ async def get_current_datetime(longitude: float, latitude: float) -> JSONDict:
 get_current_weather_schema: ToolDef = ToolDef(
     name="get_current_datetime",
     function=lambda ctx, obj: get_current_datetime(
-        obj["location"]["latitude"], obj["location"]["longitude"]
+        obj["location"]["longitude"],
+        obj["location"]["latitude"]
     ),
     schema={
         "name": "get_current_datetime",

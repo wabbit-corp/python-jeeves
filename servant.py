@@ -41,10 +41,10 @@ _LOGGER = logging.getLogger(__name__ if __name__ != "__main__" else "jove")
 
 
 EMPTY_PERSONALITY = Personality(
-    name="Jove",
+    name="Vox",
     description=dedent(
         """
-        You are Jove, a helpful and friendly AI assistant.
+        You are Vox, a helpful and friendly AI assistant.
         """
     ).strip(),
 )
@@ -80,6 +80,7 @@ async def handle_incoming_message(
     openai_client: AsyncOpenAI,
     debug_mode: bool = False,
 ):
+    channel_name = str(discord_message.channel)
     channel_id = str(discord_message.channel.id)
 
     personality = ctx.channel_personality.get(channel_id, EMPTY_PERSONALITY)
@@ -96,17 +97,23 @@ async def handle_incoming_message(
     # Add a typing indicator
     try:
         async with discord_message.channel.typing():
-            system_prompt = dedent(
-                """
-                # Personality
-                {{personality}}
+            system_prompt = (
+                dedent(
+                    """
+                    # Personality
+                    {{personality}}
 
-                # Communication Medium
-                The user messages will have the following format "Message from <user>: <content>".
-                Messages are passed to and from the users through Discord, so you can use Discord syntax (Markdown + Discord's extensions, e.g. ||<text>|| for hidden text - good for joke punchlines) for formatting.
-                Do not end your messages with a question unless it makes sense to do so in the context. You are chatting with people, not interrogating them.
-                """
-            ).replace("{{personality}}", channel_personality)
+                    # Communication Medium
+                    The user messages will have the following format "Message from <user>: <content>".
+                    Messages are passed to and from the users through Discord, so you can use Discord syntax (Markdown + Discord's extensions, e.g. ||<text>|| for hidden text - good for joke punchlines) for formatting.
+                    Do not end your messages with a question unless it makes sense to do so in the context. You are chatting with people, not interrogating them.
+
+                    Current Channel: {{channel_name}} (id: {{channel_id}})
+                    """
+                ).replace("{{personality}}", channel_personality)
+                .replace("{{channel_name}}", channel_name)
+                .replace("{{channel_id}}", channel_id)
+            )
 
             assert (
                 re.search(r"\{\{.*\}\}", system_prompt) is None
@@ -116,7 +123,13 @@ async def handle_incoming_message(
             jeeves_messages.append({"role": "system", "content": system_prompt})
 
             last_20_messages = ctx.channel_messages[channel_id][-20:]
-            while last_20_messages and last_20_messages[0].get("role") == "tool":
+
+            def get_role(message):
+                if isinstance(message, dict):
+                    return message.get("role", "user")
+                return message.role
+
+            while last_20_messages and get_role(last_20_messages[0]) == "tool":
                 last_20_messages.pop(0)
 
             for message in last_20_messages:
@@ -136,9 +149,8 @@ async def handle_incoming_message(
             while True:
                 try:
                     response = await openai_client.chat.completions.create(
-                        model="gpt-4o",
+                        model="gpt-5.2",
                         messages=jeeves_messages,
-                        max_tokens=4096,
                         tools=tools,
                     )
                 except openai.APIError as e:
@@ -199,7 +211,14 @@ async def handle_incoming_message(
                                 "error": f"Tool {tool_name} not found in modules."
                             }
 
-                        result = await tool_def.function(ctx, tool_arguments)
+                        try:
+                            result = await tool_def.function(ctx, tool_arguments)
+                            result = { "success": True, **result }
+                        except Exception as e:
+                            _LOGGER.error(
+                                f"Error while executing tool {tool_name}: {e}"
+                            )
+                            result = {"success": False, "error": str(e)}
 
                         _LOGGER.info(f"Tool {tool_name} returned {result}")
 
@@ -316,7 +335,7 @@ async def main():
             ctx.channel_messages[channel_id].append(
                 {
                     "role": "user",
-                    "content": f"Message from {discord_message.author}: {dm_content}",
+                    "content": f"Message from {discord_message.author} (<@{discord_message.author.id}:{discord_message.author.name}>): {dm_content}",
                 }
             )
 

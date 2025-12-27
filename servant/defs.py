@@ -35,11 +35,20 @@ class Personality:
 
 
 @dataclass
+class RoutineTask:
+    name: str
+    description: str
+    run_every_seconds: int
+    function: AsyncToolCallback
+
+
+@dataclass
 class Module:
     name: str
     module_prompt: str | None = None
     tools: Dict[str, ToolDef] = field(default_factory=dict)
     personalities: Dict[str, Personality] = field(default_factory=dict)
+    routine_tasks: Dict[str, RoutineTask] = field(default_factory=dict)
 
 
 @dataclass
@@ -97,6 +106,12 @@ def discover_modules() -> Dict[str, Module]:
                             name=module_name, module_prompt=module_prompt
                         )
                     modules[module_name].personalities[attr.name] = attr
+                elif isinstance(attr, RoutineTask):
+                    if module_name not in modules:
+                        modules[module_name] = Module(
+                            name=module_name, module_prompt=module_prompt
+                        )
+                    modules[module_name].routine_tasks[attr.name] = attr
 
             if module_name not in modules and module_prompt is not None:
                 modules[module_name] = Module(
