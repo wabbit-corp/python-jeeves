@@ -9,14 +9,7 @@ from servant.defs import ToolDef
 from github import Github
 from github.GithubException import GithubException
 
-# If your project defines this elsewhere, import it from there instead.
-# The important part is: token = ctx.secrets[SECRET_GITHUB_TOKEN]
-try:
-    from servant.secrets import SECRET_GITHUB_TOKEN  # type: ignore
-except Exception:
-    # Fallback so the module doesn't crash on import in dev.
-    # Replace with your actual secret key constant if different.
-    SECRET_GITHUB_TOKEN = "SECRET_GITHUB_TOKEN"
+from servant.secrets import SECRET_GITHUB_TOKEN  # type: ignore
 
 
 _REPO_FULL_NAME = "wabbit-corp/python-jeeves"
