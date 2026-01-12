@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from collections import defaultdict
 import builtins
 
+import asyncio
 import re
 import json
 from textwrap import dedent
@@ -54,6 +55,63 @@ You are \"Vox\" (a.k.a \"V\"), a personal butler to the users.
 )
 
 
+class TypingIndicator:
+    def __init__(
+        self,
+        discord_message: discord.Message,
+        client: discord.Client,
+        emoji: str = "🤔",
+        interval_seconds: float = 8.0,
+    ) -> None:
+        self.discord_message = discord_message
+        self.client = client
+        self.emoji = emoji
+        self.interval_seconds = interval_seconds
+        self._stop_event: Optional[asyncio.Event] = None
+        self._task: Optional[asyncio.Task] = None
+
+    async def _typing_loop(self) -> None:
+        assert self._stop_event is not None
+        while not self._stop_event.is_set():
+            try:
+                await self.discord_message.channel.trigger_typing()
+            except Exception as e:
+                _LOGGER.debug(f"Failed to trigger typing indicator: {e}")
+            try:
+                await asyncio.wait_for(
+                    self._stop_event.wait(), timeout=self.interval_seconds
+                )
+            except asyncio.TimeoutError:
+                continue
+
+    async def __aenter__(self) -> "TypingIndicator":
+        self._stop_event = asyncio.Event()
+        try:
+            await self.discord_message.add_reaction(self.emoji)
+        except Exception as e:
+            _LOGGER.error(f"Failed to add reaction to message: {e}")
+        self._task = asyncio.create_task(self._typing_loop())
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb) -> None:
+        if self._stop_event is not None:
+            self._stop_event.set()
+        if self._task is not None:
+            self._task.cancel()
+            try:
+                await self._task
+            except asyncio.CancelledError:
+                pass
+
+        try:
+            if getattr(self.client, "user", None) is not None:
+                await self.discord_message.remove_reaction(
+                    self.emoji, self.client.user
+                )
+        except Exception as e:
+            _LOGGER.error(f"Failed to remove reaction from message: {e}")
+
+
 async def reply(discord_message, content):
     while True:
         content = content.strip()
@@ -92,164 +150,151 @@ async def handle_incoming_message(
     personality_name_short = personality_name[0]
     channel_personality = personality.description
 
-    try:
-        await discord_message.add_reaction("🤔")
-    except Exception as e:
-        _LOGGER.error(f"Failed to add reaction to message: {e}")
-        pass
+    async with TypingIndicator(discord_message, client):
+        system_prompt = (
+            dedent(
+                """
+                # Personality
+                {{personality}}
 
-    # Add a typing indicator
-    try:
-        async with discord_message.channel.typing():
-            system_prompt = (
-                dedent(
-                    """
-                    # Personality
-                    {{personality}}
+                # Communication Medium
+                The user messages will be JSON objects (stringified) with keys: author, content, message_id, and optional reply_to.
+                reply_to, when present, is expanded one level with message_id, author, and content.
+                Messages are passed to and from the users through Discord, so you can use Discord syntax (Markdown + Discord's extensions, e.g. ||<text>|| for hidden text - good for joke punchlines) for formatting.
+                Do not end your messages with a question unless it makes sense to do so in the context. You are chatting with people, not interrogating them.
 
-                    # Communication Medium
-                    The user messages will have the following format "Message from <user>: <content>".
-                    Messages are passed to and from the users through Discord, so you can use Discord syntax (Markdown + Discord's extensions, e.g. ||<text>|| for hidden text - good for joke punchlines) for formatting.
-                    Do not end your messages with a question unless it makes sense to do so in the context. You are chatting with people, not interrogating them.
+                Don't ever use @here or @everyone mentions.
 
-                    Don't ever use @here or @everyone mentions.
+                Current Channel: {{channel_name}} (id: {{channel_id}})
 
-                    Current Channel: {{channel_name}} (id: {{channel_id}})
+                If a user asks you about your inner workings, direct them to https://github.com/wabbit-corp/python-jeeves and say that PRs are welcome.
+                """
+            ).replace("{{personality}}", channel_personality)
+            .replace("{{channel_name}}", channel_name)
+            .replace("{{channel_id}}", channel_id)
+        )
 
-                    If a user asks you about your inner workings, direct them to https://github.com/wabbit-corp/python-jeeves and say that PRs are welcome.
-                    """
-                ).replace("{{personality}}", channel_personality)
-                .replace("{{channel_name}}", channel_name)
-                .replace("{{channel_id}}", channel_id)
-            )
+        assert (
+            re.search(r"\{\{.*\}\}", system_prompt) is None
+        ), "Unresolved template variable in system prompt."
 
-            assert (
-                re.search(r"\{\{.*\}\}", system_prompt) is None
-            ), "Unresolved template variable in system prompt."
+        jeeves_messages = []
+        jeeves_messages.append({"role": "system", "content": system_prompt})
 
-            jeeves_messages = []
-            jeeves_messages.append({"role": "system", "content": system_prompt})
+        last_20_messages = ctx.channel_messages[channel_id][-20:]
 
-            last_20_messages = ctx.channel_messages[channel_id][-20:]
+        def get_role(message):
+            if isinstance(message, dict):
+                return message.get("role", "user")
+            return message.role
 
-            def get_role(message):
-                if isinstance(message, dict):
-                    return message.get("role", "user")
-                return message.role
+        while last_20_messages and get_role(last_20_messages[0]) == "tool":
+            last_20_messages.pop(0)
 
-            while last_20_messages and get_role(last_20_messages[0]) == "tool":
-                last_20_messages.pop(0)
+        for message in last_20_messages:
+            jeeves_messages.append(message)
+        # jeeves_messages.append({ 'role': 'user', 'content': discord_message.content })
 
-            for message in last_20_messages:
-                jeeves_messages.append(message)
-            # jeeves_messages.append({ 'role': 'user', 'content': discord_message.content })
+        tools = []
+        for module in ctx.modules.values():
+            for tool_name, tool_def in module.tools.items():
+                tools.append(
+                    {
+                        "type": "function",
+                        "function": tool_def.schema,
+                    }
+                )
 
-            tools = []
-            for module in ctx.modules.values():
-                for tool_name, tool_def in module.tools.items():
-                    tools.append(
-                        {
-                            "type": "function",
-                            "function": tool_def.schema,
+        while True:
+            try:
+                response = await openai_client.chat.completions.create(
+                    model="gpt-5.2",
+                    messages=jeeves_messages,
+                    tools=tools,
+                    reasoning_effort="high"
+                )
+            except openai.APIError as e:
+                _LOGGER.error(f"OpenAI API Error: {e}")
+                return
+
+            result = response.choices[0]
+            jeeves_messages.append(result.message)
+
+            _LOGGER.info(f"Jeeves response: {result}")
+
+            finish_reason = result.finish_reason
+            result_message = result.message
+
+            if finish_reason == "stop":
+                content = result_message.content
+                if m := re.match(
+                    rf"Message\s+from\s+({personality_name}|{personality_name_short})\s*:",
+                    content,
+                    re.IGNORECASE,
+                ):
+                    content = content[m.end() :].strip()
+                result.message.content = content
+                await reply(discord_message, content)
+                ctx.channel_messages[channel_id].append(result.message)
+                break
+
+            elif finish_reason == "tool_calls":
+                if "content" in result_message and result_message["content"]:
+                    await reply(discord_message, result_message["content"])
+
+                tool_calls = result_message.tool_calls
+
+                tool_messages = []
+                tool_messages.append(
+                    result.message
+                )  # extend conversation with tool calls
+
+                for tool_call in tool_calls:
+                    tool_id = tool_call.id
+                    tool_function = tool_call.function
+
+                    tool_name = tool_function.name
+                    tool_arguments = json.loads(tool_function.arguments)
+
+                    _LOGGER.info(
+                        f"Calling tool {tool_name} with arguments {tool_arguments}"
+                    )
+
+                    tool_def: ToolDef | None = None
+                    for module in ctx.modules.values():
+                        if tool_name in module.tools:
+                            tool_def = module.tools[tool_name]
+
+                    if tool_def is None:
+                        _LOGGER.error(f"Tool {tool_name} not found in modules.")
+                        result = {
+                            "error": f"Tool {tool_name} not found in modules."
                         }
-                    )
 
-            while True:
-                try:
-                    response = await openai_client.chat.completions.create(
-                        model="gpt-5.2",
-                        messages=jeeves_messages,
-                        tools=tools,
-                        reasoning_effort="high"
-                    )
-                except openai.APIError as e:
-                    _LOGGER.error(f"OpenAI API Error: {e}")
-                    return
-
-                result = response.choices[0]
-                jeeves_messages.append(result.message)
-
-                _LOGGER.info(f"Jeeves response: {result}")
-
-                finish_reason = result.finish_reason
-                result_message = result.message
-
-                if finish_reason == "stop":
-                    content = result_message.content
-                    if m := re.match(
-                        rf"Message\s+from\s+({personality_name}|{personality_name_short})\s*:",
-                        content,
-                        re.IGNORECASE,
-                    ):
-                        content = content[m.end() :].strip()
-                    result.message.content = content
-                    await reply(discord_message, content)
-                    ctx.channel_messages[channel_id].append(result.message)
-                    break
-
-                elif finish_reason == "tool_calls":
-                    if "content" in result_message and result_message["content"]:
-                        await reply(discord_message, result_message["content"])
-
-                    tool_calls = result_message.tool_calls
-
-                    tool_messages = []
-                    tool_messages.append(
-                        result.message
-                    )  # extend conversation with tool calls
-
-                    for tool_call in tool_calls:
-                        tool_id = tool_call.id
-                        tool_function = tool_call.function
-
-                        tool_name = tool_function.name
-                        tool_arguments = json.loads(tool_function.arguments)
-
-                        _LOGGER.info(
-                            f"Calling tool {tool_name} with arguments {tool_arguments}"
+                    try:
+                        result = await tool_def.function(ctx, tool_arguments)
+                        result = { "success": True, **result }
+                    except Exception as e:
+                        _LOGGER.error(
+                            f"Error while executing tool {tool_name}: {e}"
                         )
+                        result = {"success": False, "error": str(e)}
 
-                        tool_def: ToolDef | None = None
-                        for module in ctx.modules.values():
-                            if tool_name in module.tools:
-                                tool_def = module.tools[tool_name]
+                    _LOGGER.info(f"Tool {tool_name} returned {result}")
 
-                        if tool_def is None:
-                            _LOGGER.error(f"Tool {tool_name} not found in modules.")
-                            result = {
-                                "error": f"Tool {tool_name} not found in modules."
-                            }
+                    msg = {
+                        "tool_call_id": tool_id,
+                        "role": "tool",
+                        "name": tool_name,
+                        "content": json.dumps(
+                            obj_to_json(result), ensure_ascii=False
+                        ),
+                    }
 
-                        try:
-                            result = await tool_def.function(ctx, tool_arguments)
-                            result = { "success": True, **result }
-                        except Exception as e:
-                            _LOGGER.error(
-                                f"Error while executing tool {tool_name}: {e}"
-                            )
-                            result = {"success": False, "error": str(e)}
+                    jeeves_messages.append(msg)
+                    tool_messages.append(msg)
 
-                        _LOGGER.info(f"Tool {tool_name} returned {result}")
-
-                        msg = {
-                            "tool_call_id": tool_id,
-                            "role": "tool",
-                            "name": tool_name,
-                            "content": json.dumps(
-                                obj_to_json(result), ensure_ascii=False
-                            ),
-                        }
-
-                        jeeves_messages.append(msg)
-                        tool_messages.append(msg)
-
-                    ctx.channel_messages[channel_id].extend(tool_messages)
-    finally:
-        try:
-            await discord_message.remove_reaction("🤔", client.user)
-        except Exception as e:
-            _LOGGER.error(f"Failed to remove reaction from message: {e}")
-            pass
+                ctx.channel_messages[channel_id].extend(tool_messages)
 
 
 async def main():
@@ -288,29 +333,71 @@ async def main():
     ctx.openai_client = openai_client
 
     class MyClient(discord.Client):
-        async def _is_reply_to_self(self, discord_message: discord.Message) -> bool:
+        def _user_payload(self, user) -> Dict[str, str]:
+            return {
+                "id": str(user.id),
+                "name": user.name,
+                "mention": f"<@{user.id}:{user.name}>",
+            }
+
+        async def _get_referenced_message(
+            self, discord_message: discord.Message
+        ) -> Optional[discord.Message]:
             ref = discord_message.reference
             if ref is None:
-                return False
+                return None
 
             resolved = getattr(ref, "resolved", None)
             if isinstance(resolved, discord.Message):
-                return resolved.author == self.user
+                return resolved
 
             message_id = getattr(ref, "message_id", None)
             if message_id is None:
-                return False
+                return None
 
             try:
                 channel = discord_message.channel
                 ref_channel_id = getattr(ref, "channel_id", None)
                 if ref_channel_id and ref_channel_id != channel.id:
                     channel = self.get_channel(ref_channel_id) or await self.fetch_channel(ref_channel_id)
-                referenced = await channel.fetch_message(message_id)
-                return referenced.author == self.user
+                return await channel.fetch_message(message_id)
             except Exception as e:
                 _LOGGER.debug("Failed to fetch referenced message: %s", e)
+                return None
+
+        async def _build_user_message_content(
+            self, discord_message: discord.Message, dm_content: str
+        ) -> str:
+            payload: Dict[str, Any] = {
+                "author": self._user_payload(discord_message.author),
+                "content": dm_content,
+                "message_id": str(discord_message.id),
+            }
+
+            ref = discord_message.reference
+            if ref is not None:
+                referenced = await self._get_referenced_message(discord_message)
+                if referenced is not None:
+                    payload["reply_to"] = {
+                        "message_id": str(referenced.id),
+                        "author": self._user_payload(referenced.author),
+                        "content": referenced.content,
+                    }
+                else:
+                    message_id = getattr(ref, "message_id", None)
+                    if message_id is not None:
+                        payload["reply_to"] = {
+                            "message_id": str(message_id),
+                            "unresolved": True,
+                        }
+
+            return json.dumps(payload, ensure_ascii=True)
+
+        async def _is_reply_to_self(self, discord_message: discord.Message) -> bool:
+            referenced = await self._get_referenced_message(discord_message)
+            if referenced is None:
                 return False
+            return referenced.author == self.user
 
         async def on_ready(self):
             _LOGGER.info(f"Logged on as {self.user}!")
@@ -344,10 +431,13 @@ async def main():
             _LOGGER.info(f"Message from {discord_message.author}: {dm_content}")
 
             channel_id = str(discord_message.channel.id)
+            user_message_content = await self._build_user_message_content(
+                discord_message, dm_content
+            )
             ctx.channel_messages[channel_id].append(
                 {
                     "role": "user",
-                    "content": f"Message from {discord_message.author} (<@{discord_message.author.id}:{discord_message.author.name}>): {dm_content}",
+                    "content": user_message_content,
                 }
             )
 
@@ -374,7 +464,20 @@ async def main():
             personality_name = personality.name
             personality_name_short = personality.name[0]
 
+            # Check if the personality name is mentioned in the message.
             mentioned = re.search(rf"\b{personality_name}\b", msg, re.IGNORECASE) is not None
+
+            # Check for single-letter mention, ensuring it's not part of a URL or similar.
+            for m in re.finditer(rf"\b{personality_name_short}\b", msg, re.IGNORECASE):
+                # Make sure it's not some sort of ?v= (part of a URL) or similar.
+                preceding_char = msg[m.start() - 1] if m.start() > 0 else " "
+                following_char = msg[m.end()] if m.end() < len(msg) else " "
+                if not (preceding_char.isalnum() or preceding_char in ['=', '.', '_', '-']) and not (
+                    following_char.isalnum() or following_char in ['=', '.', '_', '-']
+                ):
+                    mentioned = True
+                    break
+
             replied_to_bot = False
             if not mentioned:
                 replied_to_bot = await self._is_reply_to_self(discord_message)
