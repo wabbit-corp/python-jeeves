@@ -288,6 +288,30 @@ async def main():
     ctx.openai_client = openai_client
 
     class MyClient(discord.Client):
+        async def _is_reply_to_self(self, discord_message: discord.Message) -> bool:
+            ref = discord_message.reference
+            if ref is None:
+                return False
+
+            resolved = getattr(ref, "resolved", None)
+            if isinstance(resolved, discord.Message):
+                return resolved.author == self.user
+
+            message_id = getattr(ref, "message_id", None)
+            if message_id is None:
+                return False
+
+            try:
+                channel = discord_message.channel
+                ref_channel_id = getattr(ref, "channel_id", None)
+                if ref_channel_id and ref_channel_id != channel.id:
+                    channel = self.get_channel(ref_channel_id) or await self.fetch_channel(ref_channel_id)
+                referenced = await channel.fetch_message(message_id)
+                return referenced.author == self.user
+            except Exception as e:
+                _LOGGER.debug("Failed to fetch referenced message: %s", e)
+                return False
+
         async def on_ready(self):
             _LOGGER.info(f"Logged on as {self.user}!")
             ctx.discord_loop = asyncio.get_running_loop()
@@ -327,7 +351,7 @@ async def main():
                 }
             )
 
-            # Check if message contains "\bJeeves\b" or "\bJ\b"
+            # React to direct mentions of the bot name or replies to its messages.
 
             msg = dm_content
 
@@ -350,7 +374,12 @@ async def main():
             personality_name = personality.name
             personality_name_short = personality.name[0]
 
-            if (not re.search(rf"\b{personality_name}\b", msg, re.IGNORECASE)):
+            mentioned = re.search(rf"\b{personality_name}\b", msg, re.IGNORECASE) is not None
+            replied_to_bot = False
+            if not mentioned:
+                replied_to_bot = await self._is_reply_to_self(discord_message)
+
+            if not (mentioned or replied_to_bot):
                 return
 
             await handle_incoming_message(

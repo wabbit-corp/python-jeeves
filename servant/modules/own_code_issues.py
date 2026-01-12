@@ -9,7 +9,7 @@ from servant.defs import ToolDef
 from github import Github
 from github.GithubException import GithubException
 
-from servant.secrets import SECRET_GITHUB_TOKEN  # type: ignore
+from servant.defs import SECRET_GITHUB_TOKEN  # type: ignore
 
 
 _REPO_FULL_NAME = "wabbit-corp/python-jeeves"
