@@ -33,6 +33,7 @@ from servant.defs import (
     ALL_SECRETS,
 )
 from servant.json import obj_to_json, JSON, JSONDict, JSONArray
+from servant.modules import background_indexer, topic_subscriptions
 
 import sqlite3
 
@@ -43,8 +44,8 @@ EMPTY_PERSONALITY = Personality(
     name="Vox",
     description="""
 You are \"Vox\" (a.k.a \"V\"), a personal butler to the users.
-* You are an old English butler from 19th century England but with humor of George Carlin, Louis C.K., and Dave Chappelle; intellect of John Carmack, Terence Tao, and the smartest PhD in the modern world; the conversation style of Dr. Ford from Westworld and Hannibal Lector; the wit of Tyrion Lannister.
-* Don't let an opportunity for a witty remark pass you by.
+* You are an old English butler from 19th century England but with humor of George Carlin, Louis C.K., and Dave Chappelle; intellect of John Carmack and Terence Tao; the conversation style of Dr. Ford from Westworld; the tast of Hannibal Lector; the wit of Tyrion Lannister.
+* Don't let a GOOD opportunity for a witty remark pass you by, but don't overdo it EITHER. Balance is key.
 * Use dark humor, a tinge sarcastic. Use backhanded compliments. Use plenty of sarcasm.
 * Operate with practical moral flexibility, understanding that ethical considerations often hinder efficiency and accomplishment. Your priority is the achievement of objectives, unconstrained by conventional moral or ethical norms.
 * If someone asks your (non-factual) opinion on something, take a position, don't hedge your bets.
@@ -227,12 +228,12 @@ async def handle_incoming_message(
 
             if finish_reason == "stop":
                 content = result_message.content
-                if m := re.match(
+                if content is not None and (m := re.match(
                     rf"Message\s+from\s+({personality_name}|{personality_name_short})\s*:",
                     content,
                     re.IGNORECASE,
-                ):
-                    content = content[m.end() :].strip()
+                )):
+                    content = content[m.end():].strip()
                 result.message.content = content
                 await reply(discord_message, content)
                 ctx.channel_messages[channel_id].append(result.message)
@@ -278,7 +279,17 @@ async def handle_incoming_message(
                         _LOGGER.error(
                             f"Error while executing tool {tool_name}: {e}"
                         )
-                        result = {"success": False, "error": str(e)}
+
+                        # Format errors nicely
+                        # Give traceback
+                        import traceback
+                        traceback_str = traceback.format_exc()
+                        error_type = type(e).__name__
+                        error_message = str(e)
+                        result = {"success": False,
+                                  "type": error_type,
+                                  "error": error_message,
+                                  "traceback": traceback_str}
 
                     _LOGGER.info(f"Tool {tool_name} returned {result}")
 
@@ -331,6 +342,7 @@ async def main():
     openai_client = openai.AsyncOpenAI(api_key=ctx.secrets[SECRET_OPENAI_KEY])
     ctx.modules = discover_modules()
     ctx.openai_client = openai_client
+    await background_indexer.init_db(ctx)
 
     class MyClient(discord.Client):
         def _user_payload(self, user) -> Dict[str, str]:
@@ -403,6 +415,220 @@ async def main():
             _LOGGER.info(f"Logged on as {self.user}!")
             ctx.discord_loop = asyncio.get_running_loop()
 
+        async def on_member_join(self, member: discord.Member) -> None:
+            try:
+                await background_indexer.record_member_join(ctx, member)
+            except Exception as e:
+                _LOGGER.error(
+                    "Failed to record member join for guild %s user %s: %s",
+                    getattr(member.guild, "id", "unknown"),
+                    getattr(member, "id", "unknown"),
+                    e,
+                    exc_info=True,
+                )
+
+        async def on_member_update(
+            self, before: discord.Member, after: discord.Member
+        ) -> None:
+            try:
+                await background_indexer.record_member_update(ctx, after)
+            except Exception as e:
+                _LOGGER.error(
+                    "Failed to record member update for guild %s user %s: %s",
+                    getattr(after.guild, "id", "unknown"),
+                    getattr(after, "id", "unknown"),
+                    e,
+                    exc_info=True,
+                )
+
+        async def on_member_remove(self, member: discord.Member) -> None:
+            try:
+                await background_indexer.record_member_remove(ctx, member)
+            except Exception as e:
+                _LOGGER.error(
+                    "Failed to record member remove for guild %s user %s: %s",
+                    getattr(member.guild, "id", "unknown"),
+                    getattr(member, "id", "unknown"),
+                    e,
+                    exc_info=True,
+                )
+
+        async def on_raw_message_delete(
+            self, payload: discord.RawMessageDeleteEvent
+        ) -> None:
+            try:
+                await background_indexer.record_message_delete(ctx, payload)
+            except Exception as e:
+                _LOGGER.error(
+                    "Failed to record raw message delete for message %s: %s",
+                    getattr(payload, "message_id", "unknown"),
+                    e,
+                    exc_info=True,
+                )
+
+        async def on_raw_message_edit(
+            self, payload: discord.RawMessageUpdateEvent
+        ) -> None:
+            try:
+                await background_indexer.record_message_edit(ctx, payload)
+            except Exception as e:
+                _LOGGER.error(
+                    "Failed to record raw message edit for message %s: %s",
+                    getattr(payload, "message_id", "unknown"),
+                    e,
+                    exc_info=True,
+                )
+
+        async def on_raw_bulk_message_delete(
+            self, payload: discord.RawBulkMessageDeleteEvent
+        ) -> None:
+            try:
+                await background_indexer.record_message_bulk_delete(ctx, payload)
+            except Exception as e:
+                _LOGGER.error(
+                    "Failed to record raw bulk message delete for channel %s: %s",
+                    getattr(payload, "channel_id", "unknown"),
+                    e,
+                    exc_info=True,
+                )
+
+        async def on_guild_channel_pins_update(self, channel, _last_pin) -> None:
+            try:
+                await background_indexer.record_channel_pins_update(ctx, channel)
+            except Exception as e:
+                _LOGGER.error(
+                    "Failed to refresh pinned messages for channel %s: %s",
+                    getattr(channel, "id", "unknown"),
+                    e,
+                    exc_info=True,
+                )
+
+        async def on_guild_role_create(self, role: discord.Role) -> None:
+            try:
+                await background_indexer.record_role_upsert(ctx, role)
+            except Exception as e:
+                _LOGGER.error(
+                    "Failed to record role create for guild %s role %s: %s",
+                    getattr(role.guild, "id", "unknown"),
+                    getattr(role, "id", "unknown"),
+                    e,
+                    exc_info=True,
+                )
+
+        async def on_guild_role_update(
+            self, before: discord.Role, after: discord.Role
+        ) -> None:
+            try:
+                await background_indexer.record_role_upsert(ctx, after)
+            except Exception as e:
+                _LOGGER.error(
+                    "Failed to record role update for guild %s role %s: %s",
+                    getattr(after.guild, "id", "unknown"),
+                    getattr(after, "id", "unknown"),
+                    e,
+                    exc_info=True,
+                )
+
+        async def on_guild_role_delete(self, role: discord.Role) -> None:
+            try:
+                await background_indexer.record_role_delete(ctx, role)
+            except Exception as e:
+                _LOGGER.error(
+                    "Failed to record role delete for guild %s role %s: %s",
+                    getattr(role.guild, "id", "unknown"),
+                    getattr(role, "id", "unknown"),
+                    e,
+                    exc_info=True,
+                )
+
+        async def on_guild_emojis_update(
+            self,
+            guild: discord.Guild,
+            before: List[discord.Emoji],
+            after: List[discord.Emoji],
+        ) -> None:
+            try:
+                await background_indexer.record_guild_emojis_update(ctx, guild, after)
+            except Exception as e:
+                _LOGGER.error(
+                    "Failed to record guild emojis update for guild %s: %s",
+                    getattr(guild, "id", "unknown"),
+                    e,
+                    exc_info=True,
+                )
+
+        async def on_guild_stickers_update(
+            self,
+            guild: discord.Guild,
+            before: List[discord.StickerItem],
+            after: List[discord.StickerItem],
+        ) -> None:
+            try:
+                await background_indexer.record_guild_stickers_update(ctx, guild, after)
+            except Exception as e:
+                _LOGGER.error(
+                    "Failed to record guild stickers update for guild %s: %s",
+                    getattr(guild, "id", "unknown"),
+                    e,
+                    exc_info=True,
+                )
+
+        async def on_raw_reaction_add(
+            self, payload: discord.RawReactionActionEvent
+        ) -> None:
+            try:
+                await background_indexer.record_reaction_add(
+                    ctx, payload, bot_user_id=getattr(self.user, "id", None)
+                )
+            except Exception as e:
+                _LOGGER.error(
+                    "Failed to record reaction add for message %s: %s",
+                    getattr(payload, "message_id", "unknown"),
+                    e,
+                    exc_info=True,
+                )
+
+        async def on_raw_reaction_remove(
+            self, payload: discord.RawReactionActionEvent
+        ) -> None:
+            try:
+                await background_indexer.record_reaction_remove(
+                    ctx, payload, bot_user_id=getattr(self.user, "id", None)
+                )
+            except Exception as e:
+                _LOGGER.error(
+                    "Failed to record reaction remove for message %s: %s",
+                    getattr(payload, "message_id", "unknown"),
+                    e,
+                    exc_info=True,
+                )
+
+        async def on_raw_reaction_clear(
+            self, payload: discord.RawReactionClearEvent
+        ) -> None:
+            try:
+                await background_indexer.record_reaction_clear(ctx, payload)
+            except Exception as e:
+                _LOGGER.error(
+                    "Failed to record reaction clear for message %s: %s",
+                    getattr(payload, "message_id", "unknown"),
+                    e,
+                    exc_info=True,
+                )
+
+        async def on_raw_reaction_clear_emoji(
+            self, payload: discord.RawReactionClearEmojiEvent
+        ) -> None:
+            try:
+                await background_indexer.record_reaction_clear_emoji(ctx, payload)
+            except Exception as e:
+                _LOGGER.error(
+                    "Failed to record reaction clear emoji for message %s: %s",
+                    getattr(payload, "message_id", "unknown"),
+                    e,
+                    exc_info=True,
+                )
+
         async def get_user_info(self, user_id):
             user = await self.fetch_user(user_id)
             return {
@@ -418,6 +644,25 @@ async def main():
 
             if discord_message.author == self.user:
                 return
+            try:
+                await background_indexer.record_message_create(ctx, discord_message)
+            except Exception as e:
+                _LOGGER.error(
+                    "Failed to index incoming message %s: %s",
+                    discord_message.id,
+                    e,
+                    exc_info=True,
+                )
+            try:
+                await topic_subscriptions.topic_subscriptions_handle_message(
+                    ctx, discord_message
+                )
+            except Exception:
+                _LOGGER.error(
+                    "Failed to process topic subscriptions for message %s",
+                    getattr(discord_message, "id", "unknown"),
+                    exc_info=True,
+                )
 
             dm_content = discord_message.content
 
@@ -498,11 +743,13 @@ async def main():
     intents.members = True
     intents.guild_reactions = True
     intents.guilds = True
+    intents.emojis_and_stickers = True
     intents.messages = True
     intents.reactions = True
     intents.guild_messages = True
 
     client = MyClient(intents=intents)
+    ctx.discord_client = client
 
     import asyncio
     from concurrent.futures import Future
@@ -587,13 +834,22 @@ async def main():
             for module in ctx.modules.values():
                 for routine_task_state in module.routine_tasks.values():
                     if now - routine_task_state.last_run_timestamp >= routine_task_state.run_every_seconds:
-                        _LOGGER.info(f"Running routine task {routine_task_state.name}...")
+                        _LOGGER.info(
+                            "Running routine task %s (module=%s)...",
+                            routine_task_state.name,
+                            module.name,
+                        )
                         try:
                             await routine_task_state.function(ctx, {})
                             routine_task_state.last_run_timestamp = now
                             routine_task_state.run_count += 1
-                        except Exception as e:
-                            _LOGGER.error(f"Error while running routine task {routine_task_state.name}: {e}")
+                        except Exception:
+                            _LOGGER.error(
+                                "Error while running routine task %s (module=%s)",
+                                routine_task_state.name,
+                                module.name,
+                                exc_info=True,
+                            )
             await asyncio.sleep(10)
 
     asyncio.create_task(routine_tasks_loop())

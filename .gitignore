@@ -6,6 +6,9 @@ __pycache__/
 .mypy_cache/
 /.private.yml
 /servant_commitments.sqlite3
-
+.venv/
+/*.sqlite3
+/*.sqlite3-wal
+/*.sqlite3-shm
 cache.db
 all_memes.json

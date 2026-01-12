@@ -87,6 +87,8 @@ class GlobalContext:
     send_discord_message: DiscordSendFn = None  # type: ignore
 
     discord_loop: AbstractEventLoop = None  # type: ignore
+    discord_client: Any = None  # type: ignore
+    _db_initialized: bool = False
 
 
 def discover_modules() -> Dict[str, Module]:

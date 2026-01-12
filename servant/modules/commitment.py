@@ -20,6 +20,7 @@ MODULE_PROMPT = (
 
 DEFAULT_INTERVAL_DAYS = 5
 DEFAULT_DB_FILENAME = "servant_commitments.sqlite3"
+_WARNED_MISSING_COMMITMENT_COLUMNS = set()
 
 
 # ----------------------------
@@ -45,6 +46,131 @@ def _connect(dbfile: Path) -> sqlite3.Connection:
     return conn
 
 
+def _parse_epoch_ms(value: Optional[Any]) -> Optional[int]:
+    if value is None:
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return None
+        if text.isdigit() or (text.startswith("-") and text[1:].isdigit()):
+            try:
+                return int(text)
+            except ValueError:
+                return None
+        try:
+            if text.endswith("Z"):
+                text = text[:-1]
+            parsed = dt.datetime.fromisoformat(text)
+        except ValueError:
+            return None
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=dt.timezone.utc)
+        else:
+            parsed = parsed.astimezone(dt.timezone.utc)
+        return int(parsed.timestamp() * 1000)
+    return None
+
+
+def _migrate_timestamp_columns(conn: sqlite3.Connection) -> None:
+    rows = conn.execute(
+        """
+        SELECT rowid AS _rowid, created_at, updated_at
+        FROM commitments
+        WHERE (created_at IS NOT NULL AND typeof(created_at) IN ('text', 'real'))
+           OR (updated_at IS NOT NULL AND typeof(updated_at) IN ('text', 'real'))
+        """
+    ).fetchall()
+
+    for row in rows:
+        rowid = row["_rowid"] if "_rowid" in row.keys() else None
+        if rowid is None:
+            _LOGGER.warning(
+                "Commitments migration row missing rowid; skipping timestamp migration."
+            )
+            continue
+        updates: Dict[str, int] = {}
+        created_ms = _parse_epoch_ms(row["created_at"])
+        updated_ms = _parse_epoch_ms(row["updated_at"])
+        if created_ms is not None:
+            updates["created_at"] = created_ms
+        if updated_ms is not None:
+            updates["updated_at"] = updated_ms
+        if not updates:
+            continue
+        columns = ", ".join(f"{col} = ?" for col in updates.keys())
+        params = list(updates.values()) + [rowid]
+        conn.execute(
+            f"UPDATE commitments SET {columns} WHERE rowid = ?",
+            params,
+        )
+
+
+def _ensure_commitments_columns(conn: sqlite3.Connection) -> None:
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(commitments)")}
+    now: Optional[int] = None
+
+    def _now() -> int:
+        nonlocal now
+        if now is None:
+            now = _now_ms()
+        return now
+
+    if "interval_days" not in columns:
+        _LOGGER.info("Adding missing column commitments.interval_days")
+        conn.execute(
+            "ALTER TABLE commitments ADD COLUMN interval_days INTEGER NOT NULL DEFAULT 5;"
+        )
+        columns.add("interval_days")
+    if "interval_days" in columns:
+        conn.execute(
+            "UPDATE commitments SET interval_days = ? WHERE interval_days IS NULL",
+            (DEFAULT_INTERVAL_DAYS,),
+        )
+
+    if "last_checkin_date" not in columns:
+        _LOGGER.info("Adding missing column commitments.last_checkin_date")
+        conn.execute("ALTER TABLE commitments ADD COLUMN last_checkin_date TEXT;")
+        columns.add("last_checkin_date")
+
+    if "status" not in columns:
+        _LOGGER.info("Adding missing column commitments.status")
+        conn.execute(
+            "ALTER TABLE commitments ADD COLUMN status TEXT NOT NULL DEFAULT 'active';"
+        )
+        columns.add("status")
+    if "status" in columns:
+        conn.execute("UPDATE commitments SET status = 'active' WHERE status IS NULL")
+
+    if "created_at" not in columns:
+        _LOGGER.info("Adding missing column commitments.created_at")
+        conn.execute(
+            "ALTER TABLE commitments ADD COLUMN created_at INTEGER NOT NULL DEFAULT 0;"
+        )
+        columns.add("created_at")
+    if "created_at" in columns:
+        conn.execute(
+            "UPDATE commitments SET created_at = ? WHERE created_at IS NULL OR created_at = 0",
+            (_now(),),
+        )
+
+    if "updated_at" not in columns:
+        _LOGGER.info("Adding missing column commitments.updated_at")
+        conn.execute(
+            "ALTER TABLE commitments ADD COLUMN updated_at INTEGER NOT NULL DEFAULT 0;"
+        )
+        columns.add("updated_at")
+    if "updated_at" in columns:
+        conn.execute(
+            "UPDATE commitments SET updated_at = ? WHERE updated_at IS NULL OR updated_at = 0",
+            (_now(),),
+        )
+
+
 def _init_db(conn: sqlite3.Connection) -> None:
     conn.execute(
         """
@@ -59,8 +185,8 @@ def _init_db(conn: sqlite3.Connection) -> None:
             interval_days INTEGER NOT NULL DEFAULT 5,
             last_checkin_date TEXT NULL,            -- YYYY-MM-DD
             status TEXT NOT NULL DEFAULT 'active',  -- active|cancelled|ended
-            created_at TEXT NOT NULL,               -- ISO timestamp
-            updated_at TEXT NOT NULL                -- ISO timestamp
+            created_at INTEGER NOT NULL,            -- epoch ms
+            updated_at INTEGER NOT NULL             -- epoch ms
         );
         """
     )
@@ -72,6 +198,8 @@ def _init_db(conn: sqlite3.Connection) -> None:
         "CREATE INDEX IF NOT EXISTS idx_commitments_user "
         "ON commitments(user_id);"
     )
+    _ensure_commitments_columns(conn)
+    _migrate_timestamp_columns(conn)
     conn.commit()
 
 
@@ -79,8 +207,8 @@ def _today_yyyy_mm_dd() -> str:
     return dt.date.today().strftime("%Y-%m-%d")
 
 
-def _now_iso() -> str:
-    return dt.datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
+def _now_ms() -> int:
+    return int(dt.datetime.now(dt.timezone.utc).timestamp() * 1000)
 
 
 def _parse_date(s: str) -> dt.date:
@@ -102,6 +230,51 @@ class Commitment:
 
 
 def _row_to_commitment(r: sqlite3.Row) -> Commitment:
+    keys = set(r.keys())
+    missing_optional: List[str] = []
+
+    raw_interval = r["interval_days"] if "interval_days" in keys else None
+    if raw_interval is None:
+        interval_days = DEFAULT_INTERVAL_DAYS
+        if "interval_days" not in keys:
+            missing_optional.append("interval_days")
+    else:
+        try:
+            interval_days = int(raw_interval)
+        except (TypeError, ValueError):
+            _LOGGER.warning(
+                "Invalid interval_days %r for commitment id=%s; using default %s",
+                raw_interval,
+                r["id"] if "id" in keys else "unknown",
+                DEFAULT_INTERVAL_DAYS,
+            )
+            interval_days = DEFAULT_INTERVAL_DAYS
+
+    if "last_checkin_date" in keys:
+        last_checkin_date = r["last_checkin_date"]
+    else:
+        last_checkin_date = None
+        missing_optional.append("last_checkin_date")
+
+    if "status" in keys and r["status"] is not None:
+        status = str(r["status"])
+    else:
+        status = "active"
+        if "status" not in keys:
+            missing_optional.append("status")
+
+    if missing_optional:
+        new_missing = sorted(
+            set(missing_optional) - _WARNED_MISSING_COMMITMENT_COLUMNS
+        )
+        if new_missing:
+            _LOGGER.warning(
+                "Commitments row missing columns %s (row id=%s). Using defaults.",
+                ", ".join(new_missing),
+                r["id"] if "id" in keys else "unknown",
+            )
+            _WARNED_MISSING_COMMITMENT_COLUMNS.update(new_missing)
+
     return Commitment(
         id=int(r["id"]),
         name=str(r["name"]),
@@ -110,9 +283,9 @@ def _row_to_commitment(r: sqlite3.Row) -> Commitment:
         channel_id=str(r["channel_id"]),
         start_date=str(r["start_date"]),
         end_date=str(r["end_date"]),
-        interval_days=int(r["interval_days"]),
-        last_checkin_date=r["last_checkin_date"],
-        status=str(r["status"]),
+        interval_days=interval_days,
+        last_checkin_date=last_checkin_date,
+        status=status,
     )
 
 
@@ -157,7 +330,7 @@ async def commitment_manage(ctx: GlobalContext, obj: JSON) -> JSONDict:
         raise ValueError("operation must be one of: create, update, cancel, list")
 
     def _logic(conn: sqlite3.Connection) -> JSONDict:
-        now = _now_iso()
+        now = _now_ms()
 
         if op == "create":
             name = str(obj["name"])
@@ -366,7 +539,9 @@ async def commitment_checkin_task(ctx: GlobalContext, _obj: JSON) -> JSONDict:
 
     today = dt.date.today()
     today_s = today.isoformat()
-    now = _now_iso()
+    now = _now_ms()
+    dbfile = _db_path(ctx)
+    _LOGGER.debug("commitment_checkin_task starting (db=%s)", dbfile)
 
     async def _work(conn: sqlite3.Connection) -> JSONDict:
         # 1) End commitments past end_date
@@ -392,16 +567,23 @@ async def commitment_checkin_task(ctx: GlobalContext, _obj: JSON) -> JSONDict:
         # print(f"Found {len(rows)} active commitments.")
 
         due_by_channel: Dict[str, List[Commitment]] = {}
-        due_ids: List[int] = []
 
         for r in rows:
-            c = _row_to_commitment(r)
-            # print(c)
+            try:
+                c = _row_to_commitment(r)
+            except Exception:
+                _LOGGER.error(
+                    "Failed to parse commitment row; skipping.",
+                    exc_info=True,
+                )
+                continue
             if _should_checkin(today, c.last_checkin_date, c.interval_days):
                 due_by_channel.setdefault(c.channel_id, []).append(c)
-                due_ids.append(c.id)
 
         # 3) Send one message per channel
+        due_ids: List[int] = []
+        channels_pinged = 0
+        channels_failed = 0
         for channel_id, commitments in due_by_channel.items():
             # Group by user
             by_user: Dict[str, List[Commitment]] = {}
@@ -416,11 +598,24 @@ async def commitment_checkin_task(ctx: GlobalContext, _obj: JSON) -> JSONDict:
                 lines.append(f"{_mention(uid)}")
                 for c in by_user[uid]:
                     lines.append(f"- **{c.name}** (ends {c.end_date}): {c.description}")
-                lines.append("")
+            lines.append("")
 
             lines.append("Reply with: what you did, what’s blocked, and what you’ll do next.")
 
-            await ctx.send_discord_message(channel_id, "\n".join(lines).strip())
+            try:
+                await ctx.send_discord_message(channel_id, "\n".join(lines).strip())
+            except Exception:
+                channels_failed += 1
+                _LOGGER.error(
+                    "Failed to send commitment check-in to channel %s (commitments=%d users=%d).",
+                    channel_id,
+                    len(commitments),
+                    len(by_user),
+                    exc_info=True,
+                )
+                continue
+            channels_pinged += 1
+            due_ids.extend(c.id for c in commitments)
 
         # 4) Mark last_checkin_date for what we pinged
         if due_ids:
@@ -435,7 +630,25 @@ async def commitment_checkin_task(ctx: GlobalContext, _obj: JSON) -> JSONDict:
             )
 
         conn.commit()
-        return {"ok": True, "channels_pinged": len(due_by_channel), "commitments_pinged": len(due_ids)}
+        commitments_pinged = len(due_ids)
+        if channels_pinged or channels_failed:
+            _LOGGER.info(
+                "Commitment check-in result: channels_pinged=%d commitments_pinged=%d channels_failed=%d",
+                channels_pinged,
+                commitments_pinged,
+                channels_failed,
+            )
+        else:
+            _LOGGER.debug(
+                "Commitment check-in result: no commitments due (active=%d)",
+                len(rows),
+            )
+        return {
+            "ok": True,
+            "channels_pinged": channels_pinged,
+            "commitments_pinged": commitments_pinged,
+            "channels_failed": channels_failed,
+        }
 
     # Run in thread (sqlite is sync)
     return await _with_db(ctx, lambda conn: asyncio.run(_work(conn)))
