@@ -1,0 +1,18 @@
+[tool.black]
+line-length = 120
+target-version = ["py310"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["F", "E", "W", "I", "B", "UP"]
+ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["B"]
+"codi/api/tests/**/*.py" = ["B"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests", "codi/api/tests"]

@@ -18,7 +18,7 @@ class RateLimiter:
         self._period_s = float(period_s)
         self._lock = asyncio.Lock()
         self._last_call = 0.0
-        self._calls = deque()
+        self._calls: deque[float] = deque()
 
     @classmethod
     def from_limits(
@@ -45,9 +45,7 @@ class RateLimiter:
             except Exception:
                 max_calls = None
 
-        if (min_interval_s is None or min_interval_s <= 0) and (
-            max_calls is None or max_calls <= 0
-        ):
+        if (min_interval_s is None or min_interval_s <= 0) and (max_calls is None or max_calls <= 0):
             return None
         return cls(
             min_interval_s=min_interval_s,

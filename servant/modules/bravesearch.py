@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from servant.api.bravesearch import BraveSearchApi
 from servant.defs import GlobalContext, ToolDef, SECRET_BRAVE_KEY
-from servant.json import JSONDict
+from typed_json import JSON, JSONDict, coerce_int, coerce_str, require_obj
 
 MODULE_PROMPT = """
 ## Web Search
@@ -25,19 +25,17 @@ def _clamp_num_results(value: int | None) -> int:
 
 def _extract_results(data: JSONDict, limit: int) -> JSONDict:
     web = data.get("web", {})
-    web_results = []
+    web_results: list[JSON] = []
     if isinstance(web, dict):
-        web_results = web.get("results", [])
-    if isinstance(web_results, list):
-        web_results = web_results[:limit]
-    else:
-        web_results = []
+        raw_results = web.get("results", [])
+        if isinstance(raw_results, list):
+            web_results = raw_results
+    web_results = web_results[:limit]
 
-    news_results = data.get("news", [])
-    if isinstance(news_results, list):
-        news_results = news_results[:limit]
-    else:
-        news_results = []
+    news_results: list[JSON] = []
+    raw_news = data.get("news", [])
+    if isinstance(raw_news, list):
+        news_results = raw_news[:limit]
 
     results: JSONDict = {"web": web_results}
     if news_results:
@@ -50,15 +48,23 @@ async def search_web(
     query: str,
     num_results: int = _DEFAULT_NUM_RESULTS,
 ) -> JSONDict:
-    api_key = ctx.secrets.get(SECRET_BRAVE_KEY)
-    if not api_key:
+    api_key_raw = ctx.secrets.get(SECRET_BRAVE_KEY)
+    if not api_key_raw:
         return {"error": "Missing Brave Search API key. Set secret brave.key."}
+    api_key = coerce_str(api_key_raw, field="brave.key", allow_empty=False)
 
     limit = _clamp_num_results(num_results)
     async with BraveSearchApi(api_key=api_key) as api:
         data = await api.search(query, num_results=limit)
 
     return {"query": query, "results": _extract_results(data, limit)}
+
+
+async def _search_web_tool(ctx: GlobalContext, obj: JSON) -> JSONDict:
+    data = require_obj(obj)
+    query = coerce_str(data.get("query"), field="query", allow_empty=False)
+    num_results = coerce_int(data.get("num_results"), _DEFAULT_NUM_RESULTS)
+    return await search_web(ctx, query, num_results)
 
 
 search_web_tool: ToolDef = ToolDef(
@@ -82,9 +88,5 @@ search_web_tool: ToolDef = ToolDef(
             "required": ["query"],
         },
     },
-    function=lambda ctx, obj: search_web(
-        ctx,
-        obj["query"],
-        obj.get("num_results", _DEFAULT_NUM_RESULTS),
-    ),
+    function=_search_web_tool,
 )

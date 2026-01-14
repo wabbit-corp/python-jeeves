@@ -4,12 +4,12 @@ import asyncio
 import datetime as dt
 import logging
 import sqlite3
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from collections.abc import Callable
 
 from servant.defs import RoutineTask, ToolDef, GlobalContext
-from servant.json import JSON, JSONDict
+from typed_json import JSON, JSONDict, coerce_int, coerce_str
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -20,12 +20,13 @@ MODULE_PROMPT = (
 
 DEFAULT_INTERVAL_DAYS = 5
 DEFAULT_DB_FILENAME = "servant_commitments.sqlite3"
-_WARNED_MISSING_COMMITMENT_COLUMNS = set()
+_WARNED_MISSING_COMMITMENT_COLUMNS: set[str] = set()
 
 
 # ----------------------------
 # Storage
 # ----------------------------
+
 
 def _db_path(ctx: GlobalContext) -> Path:
     """
@@ -34,7 +35,7 @@ def _db_path(ctx: GlobalContext) -> Path:
     """
     raw = ctx.secrets.get("commitments_db_path")
     if raw:
-        return Path(raw).expanduser().resolve()
+        return Path(coerce_str(raw, field="commitments_db_path", allow_empty=False)).expanduser().resolve()
     return (Path.cwd() / DEFAULT_DB_FILENAME).resolve()
 
 
@@ -46,7 +47,7 @@ def _connect(dbfile: Path) -> sqlite3.Connection:
     return conn
 
 
-def _parse_epoch_ms(value: Optional[Any]) -> Optional[int]:
+def _parse_epoch_ms(value: object | None) -> int | None:
     if value is None:
         return None
     if isinstance(value, int):
@@ -76,6 +77,24 @@ def _parse_epoch_ms(value: Optional[Any]) -> Optional[int]:
     return None
 
 
+def _require_int(obj: JSONDict, key: str) -> int:
+    raw = obj.get(key)
+    if raw is None:
+        raise ValueError(f"{key} is required.")
+    if isinstance(raw, bool):
+        return int(raw)
+    if isinstance(raw, int):
+        return raw
+    if isinstance(raw, float):
+        return int(raw)
+    if isinstance(raw, str):
+        try:
+            return int(raw)
+        except ValueError as exc:
+            raise ValueError(f"{key} must be an integer.") from exc
+    raise ValueError(f"{key} must be an integer.")
+
+
 def _migrate_timestamp_columns(conn: sqlite3.Connection) -> None:
     rows = conn.execute(
         """
@@ -89,11 +108,9 @@ def _migrate_timestamp_columns(conn: sqlite3.Connection) -> None:
     for row in rows:
         rowid = row["_rowid"] if "_rowid" in row.keys() else None
         if rowid is None:
-            _LOGGER.warning(
-                "Commitments migration row missing rowid; skipping timestamp migration."
-            )
+            _LOGGER.warning("Commitments migration row missing rowid; skipping timestamp migration.")
             continue
-        updates: Dict[str, int] = {}
+        updates: dict[str, int] = {}
         created_ms = _parse_epoch_ms(row["created_at"])
         updated_ms = _parse_epoch_ms(row["updated_at"])
         if created_ms is not None:
@@ -112,7 +129,7 @@ def _migrate_timestamp_columns(conn: sqlite3.Connection) -> None:
 
 def _ensure_commitments_columns(conn: sqlite3.Connection) -> None:
     columns = {row["name"] for row in conn.execute("PRAGMA table_info(commitments)")}
-    now: Optional[int] = None
+    now: int | None = None
 
     def _now() -> int:
         nonlocal now
@@ -122,9 +139,7 @@ def _ensure_commitments_columns(conn: sqlite3.Connection) -> None:
 
     if "interval_days" not in columns:
         _LOGGER.info("Adding missing column commitments.interval_days")
-        conn.execute(
-            "ALTER TABLE commitments ADD COLUMN interval_days INTEGER NOT NULL DEFAULT 5;"
-        )
+        conn.execute("ALTER TABLE commitments ADD COLUMN interval_days INTEGER NOT NULL DEFAULT 5;")
         columns.add("interval_days")
     if "interval_days" in columns:
         conn.execute(
@@ -139,18 +154,14 @@ def _ensure_commitments_columns(conn: sqlite3.Connection) -> None:
 
     if "status" not in columns:
         _LOGGER.info("Adding missing column commitments.status")
-        conn.execute(
-            "ALTER TABLE commitments ADD COLUMN status TEXT NOT NULL DEFAULT 'active';"
-        )
+        conn.execute("ALTER TABLE commitments ADD COLUMN status TEXT NOT NULL DEFAULT 'active';")
         columns.add("status")
     if "status" in columns:
         conn.execute("UPDATE commitments SET status = 'active' WHERE status IS NULL")
 
     if "created_at" not in columns:
         _LOGGER.info("Adding missing column commitments.created_at")
-        conn.execute(
-            "ALTER TABLE commitments ADD COLUMN created_at INTEGER NOT NULL DEFAULT 0;"
-        )
+        conn.execute("ALTER TABLE commitments ADD COLUMN created_at INTEGER NOT NULL DEFAULT 0;")
         columns.add("created_at")
     if "created_at" in columns:
         conn.execute(
@@ -160,9 +171,7 @@ def _ensure_commitments_columns(conn: sqlite3.Connection) -> None:
 
     if "updated_at" not in columns:
         _LOGGER.info("Adding missing column commitments.updated_at")
-        conn.execute(
-            "ALTER TABLE commitments ADD COLUMN updated_at INTEGER NOT NULL DEFAULT 0;"
-        )
+        conn.execute("ALTER TABLE commitments ADD COLUMN updated_at INTEGER NOT NULL DEFAULT 0;")
         columns.add("updated_at")
     if "updated_at" in columns:
         conn.execute(
@@ -190,14 +199,8 @@ def _init_db(conn: sqlite3.Connection) -> None:
         );
         """
     )
-    conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_commitments_active_channel "
-        "ON commitments(status, channel_id);"
-    )
-    conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_commitments_user "
-        "ON commitments(user_id);"
-    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_commitments_active_channel " "ON commitments(status, channel_id);")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_commitments_user " "ON commitments(user_id);")
     _ensure_commitments_columns(conn)
     _migrate_timestamp_columns(conn)
     conn.commit()
@@ -225,13 +228,28 @@ class Commitment:
     start_date: str
     end_date: str
     interval_days: int
-    last_checkin_date: Optional[str]
+    last_checkin_date: str | None
     status: str
+
+
+def _commitment_payload(commitment: Commitment) -> JSONDict:
+    return {
+        "id": commitment.id,
+        "name": commitment.name,
+        "description": commitment.description,
+        "user_id": commitment.user_id,
+        "channel_id": commitment.channel_id,
+        "start_date": commitment.start_date,
+        "end_date": commitment.end_date,
+        "interval_days": commitment.interval_days,
+        "last_checkin_date": commitment.last_checkin_date,
+        "status": commitment.status,
+    }
 
 
 def _row_to_commitment(r: sqlite3.Row) -> Commitment:
     keys = set(r.keys())
-    missing_optional: List[str] = []
+    missing_optional: list[str] = []
 
     raw_interval = r["interval_days"] if "interval_days" in keys else None
     if raw_interval is None:
@@ -264,9 +282,7 @@ def _row_to_commitment(r: sqlite3.Row) -> Commitment:
             missing_optional.append("status")
 
     if missing_optional:
-        new_missing = sorted(
-            set(missing_optional) - _WARNED_MISSING_COMMITMENT_COLUMNS
-        )
+        new_missing = sorted(set(missing_optional) - _WARNED_MISSING_COMMITMENT_COLUMNS)
         if new_missing:
             _LOGGER.warning(
                 "Commitments row missing columns %s (row id=%s). Using defaults.",
@@ -289,10 +305,10 @@ def _row_to_commitment(r: sqlite3.Row) -> Commitment:
     )
 
 
-async def _with_db(ctx: GlobalContext, fn):
+async def _with_db(ctx: GlobalContext, fn: Callable[[sqlite3.Connection], JSONDict]) -> JSONDict:
     dbfile = _db_path(ctx)
 
-    def _run():
+    def _run() -> JSONDict:
         dbfile.parent.mkdir(parents=True, exist_ok=True)
         conn = _connect(dbfile)
         try:
@@ -304,7 +320,6 @@ async def _with_db(ctx: GlobalContext, fn):
     return await asyncio.to_thread(_run)
 
 
-
 def _mention(user_id: str) -> str:
     # Discord mention format
     return f"<@{user_id}>"
@@ -313,6 +328,7 @@ def _mention(user_id: str) -> str:
 # ----------------------------
 # Tool: create/update/cancel/list
 # ----------------------------
+
 
 async def commitment_manage(ctx: GlobalContext, obj: JSON) -> JSONDict:
     """
@@ -339,7 +355,9 @@ async def commitment_manage(ctx: GlobalContext, obj: JSON) -> JSONDict:
             channel_id = str(obj["channel_id"])
             start_date = str(obj.get("start_date") or _today_yyyy_mm_dd())
             end_date = str(obj["end_date"]) if "end_date" in obj else None
-            interval_days = int(obj.get("interval_days") or DEFAULT_INTERVAL_DAYS)
+            interval_days = coerce_int(obj.get("interval_days"), DEFAULT_INTERVAL_DAYS)
+            if interval_days <= 0:
+                interval_days = DEFAULT_INTERVAL_DAYS
 
             sd = _parse_date(start_date)
             ed = _parse_date(end_date) if end_date else sd + dt.timedelta(days=30)
@@ -367,12 +385,18 @@ async def commitment_manage(ctx: GlobalContext, obj: JSON) -> JSONDict:
                 ),
             )
             conn.commit()
-            cid = int(cur.lastrowid)
+            lastrowid = cur.lastrowid
+            if lastrowid is None:
+                raise RuntimeError("Failed to create commitment.")
+            cid = int(lastrowid)
             row = conn.execute("SELECT * FROM commitments WHERE id = ?", (cid,)).fetchone()
-            return {"ok": True, "commitment": asdict(_row_to_commitment(row))}
+            return {
+                "ok": True,
+                "commitment": _commitment_payload(_row_to_commitment(row)),
+            }
 
         if op == "update":
-            cid = int(obj["commitment_id"])
+            cid = _require_int(obj, "commitment_id")
 
             # Build dynamic update set from provided fields.
             allowed = {
@@ -386,13 +410,13 @@ async def commitment_manage(ctx: GlobalContext, obj: JSON) -> JSONDict:
                 "status": "status",
             }
 
-            sets: List[str] = []
-            params: List[Any] = []
+            sets: list[str] = []
+            update_params: list[object] = []
 
             for k, col in allowed.items():
                 if k in obj and obj[k] is not None:
                     sets.append(f"{col} = ?")
-                    params.append(obj[k])
+                    update_params.append(obj[k])
 
             if not sets:
                 raise ValueError("No updatable fields provided.")
@@ -415,22 +439,25 @@ async def commitment_manage(ctx: GlobalContext, obj: JSON) -> JSONDict:
                     raise ValueError("end_date must be >= start_date")
 
             sets.append("updated_at = ?")
-            params.append(now)
-            params.append(cid)
+            update_params.append(now)
+            update_params.append(cid)
 
             conn.execute(
                 f"UPDATE commitments SET {', '.join(sets)} WHERE id = ?",
-                tuple(params),
+                tuple(update_params),
             )
             conn.commit()
 
             row = conn.execute("SELECT * FROM commitments WHERE id = ?", (cid,)).fetchone()
             if not row:
                 raise ValueError(f"Commitment id={cid} not found.")
-            return {"ok": True, "commitment": asdict(_row_to_commitment(row))}
+            return {
+                "ok": True,
+                "commitment": _commitment_payload(_row_to_commitment(row)),
+            }
 
         if op == "cancel":
-            cid = int(obj["commitment_id"])
+            cid = _require_int(obj, "commitment_id")
             cur = conn.execute(
                 """
                 UPDATE commitments
@@ -445,13 +472,19 @@ async def commitment_manage(ctx: GlobalContext, obj: JSON) -> JSONDict:
                 row = conn.execute("SELECT * FROM commitments WHERE id = ?", (cid,)).fetchone()
                 if not row:
                     raise ValueError(f"Commitment id={cid} not found.")
-                return {"ok": True, "commitment": asdict(_row_to_commitment(row))}
+                return {
+                    "ok": True,
+                    "commitment": _commitment_payload(_row_to_commitment(row)),
+                }
             row = conn.execute("SELECT * FROM commitments WHERE id = ?", (cid,)).fetchone()
-            return {"ok": True, "commitment": asdict(_row_to_commitment(row))}
+            return {
+                "ok": True,
+                "commitment": _commitment_payload(_row_to_commitment(row)),
+            }
 
         # op == "list"
         where = []
-        params = []
+        params: list[str] = []
 
         if "user_id" in obj and obj["user_id"] is not None:
             where.append("user_id = ?")
@@ -469,7 +502,10 @@ async def commitment_manage(ctx: GlobalContext, obj: JSON) -> JSONDict:
             tuple(params),
         ).fetchall()
 
-        return {"ok": True, "commitments": [asdict(_row_to_commitment(r)) for r in rows]}
+        return {
+            "ok": True,
+            "commitments": [_commitment_payload(_row_to_commitment(r)) for r in rows],
+        }
 
     return await _with_db(ctx, _logic)
 
@@ -495,16 +531,17 @@ commitment_manage_tool: ToolDef = ToolDef(
                     "type": "integer",
                     "description": "Required for update/cancel.",
                 },
-
                 "name": {"type": "string"},
                 "description": {"type": "string"},
                 "user_id": {"type": "string", "description": "Discord user id."},
                 "channel_id": {"type": "string", "description": "Discord channel id."},
-                "start_date": {"type": "string", "description": "YYYY-MM-DD. Defaults to today."},
+                "start_date": {
+                    "type": "string",
+                    "description": "YYYY-MM-DD. Defaults to today.",
+                },
                 "end_date": {"type": "string", "description": "YYYY-MM-DD."},
                 "interval_days": {"type": "integer", "description": "Defaults to 5."},
                 "status": {"type": "string", "enum": ["active", "cancelled", "ended"]},
-
                 # list filters
                 "channel_id": {"type": "string"},
                 "user_id": {"type": "string"},
@@ -520,7 +557,8 @@ commitment_manage_tool: ToolDef = ToolDef(
 # RoutineTask: check-in
 # ----------------------------
 
-def _should_checkin(today: dt.date, last_checkin: Optional[str], interval_days: int) -> bool:
+
+def _should_checkin(today: dt.date, last_checkin: str | None, interval_days: int) -> bool:
     # return True
     if not last_checkin:
         return True
@@ -536,6 +574,10 @@ async def commitment_checkin_task(ctx: GlobalContext, _obj: JSON) -> JSONDict:
     Runs periodically. For each channel, pings users who have commitments due for check-in.
     """
     # print("commitment_checkin_task running...")
+
+    if ctx.send_discord_message is None:
+        raise RuntimeError("Discord send function not initialized.")
+    send_fn = ctx.send_discord_message
 
     today = dt.date.today()
     today_s = today.isoformat()
@@ -566,7 +608,7 @@ async def commitment_checkin_task(ctx: GlobalContext, _obj: JSON) -> JSONDict:
 
         # print(f"Found {len(rows)} active commitments.")
 
-        due_by_channel: Dict[str, List[Commitment]] = {}
+        due_by_channel: dict[str, list[Commitment]] = {}
 
         for r in rows:
             try:
@@ -581,17 +623,17 @@ async def commitment_checkin_task(ctx: GlobalContext, _obj: JSON) -> JSONDict:
                 due_by_channel.setdefault(c.channel_id, []).append(c)
 
         # 3) Send one message per channel
-        due_ids: List[int] = []
+        due_ids: list[int] = []
         channels_pinged = 0
         channels_failed = 0
         for channel_id, commitments in due_by_channel.items():
             # Group by user
-            by_user: Dict[str, List[Commitment]] = {}
+            by_user: dict[str, list[Commitment]] = {}
             for c in commitments:
                 by_user.setdefault(c.user_id, []).append(c)
 
             mentioned = " ".join(_mention(uid) for uid in sorted(by_user.keys()))
-            lines: List[str] = []
+            lines: list[str] = []
             lines.append(f"Progress check-in time.")
 
             for uid in sorted(by_user.keys()):
@@ -603,7 +645,7 @@ async def commitment_checkin_task(ctx: GlobalContext, _obj: JSON) -> JSONDict:
             lines.append("Reply with: what you did, what’s blocked, and what you’ll do next.")
 
             try:
-                await ctx.send_discord_message(channel_id, "\n".join(lines).strip())
+                await send_fn(channel_id, "\n".join(lines).strip())
             except Exception:
                 channels_failed += 1
                 _LOGGER.error(

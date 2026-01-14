@@ -3,12 +3,12 @@ from __future__ import annotations
 import datetime as dt
 import logging
 import re
-from typing import Any, Dict, Iterable, List, Optional
+from typing import AsyncIterator, Iterable, TypeGuard
 
 import discord
 
 from servant.defs import GlobalContext, ToolDef
-from servant.json import JSON, JSONDict
+from typed_json import JSON, JSONDict, coerce_int, coerce_optional_str, obj_to_json
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -30,18 +30,11 @@ DEFAULT_CHANNEL_MAX_RESULTS = 50
 MAX_CHANNEL_RESULTS = 200
 
 
-def _coerce_int(value: Any, default: int) -> int:
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return default
-
-
 def _clamp(value: int, min_value: int, max_value: int) -> int:
     return max(min_value, min(value, max_value))
 
 
-def _to_iso(ts: Optional[dt.datetime]) -> Optional[str]:
+def _to_iso(ts: dt.datetime | None) -> str | None:
     if ts is None:
         return None
     if ts.tzinfo is not None:
@@ -50,13 +43,13 @@ def _to_iso(ts: Optional[dt.datetime]) -> Optional[str]:
 
 
 def _get_client(ctx: GlobalContext) -> discord.Client:
-    client = getattr(ctx, "discord_client", None)
+    client = ctx.discord_client
     if client is None:
         raise RuntimeError("discord client not available")
     return client
 
 
-def _snowflake(value: Optional[str], field: str) -> Optional[discord.Object]:
+def _snowflake(value: str | None, field: str) -> discord.Object | None:
     if value is None:
         return None
     try:
@@ -65,7 +58,10 @@ def _snowflake(value: Optional[str], field: str) -> Optional[discord.Object]:
         raise ValueError(f"{field} must be a valid snowflake id.")
 
 
-async def _resolve_channel(client: discord.Client, channel_id: str) -> Any:
+ResolvedChannel = discord.abc.GuildChannel | discord.Thread | discord.abc.PrivateChannel
+
+
+async def _resolve_channel(client: discord.Client, channel_id: str) -> ResolvedChannel:
     cid = int(str(channel_id))
     channel = client.get_channel(cid)
     if channel is None:
@@ -76,8 +72,8 @@ async def _resolve_channel(client: discord.Client, channel_id: str) -> Any:
 async def _resolve_guild(
     client: discord.Client,
     *,
-    guild_id: Optional[str],
-    channel_id: Optional[str],
+    guild_id: str | None,
+    channel_id: str | None,
 ) -> discord.Guild:
     if guild_id:
         gid = int(str(guild_id))
@@ -87,18 +83,20 @@ async def _resolve_guild(
         return guild
     if channel_id:
         channel = await _resolve_channel(client, channel_id)
-        guild = getattr(channel, "guild", None)
-        if guild is None:
-            raise ValueError("channel does not belong to a guild.")
-        return guild
+        if isinstance(channel, (discord.abc.GuildChannel, discord.Thread)):
+            guild = channel.guild
+            if guild is None:
+                raise ValueError("channel does not belong to a guild.")
+            return guild
+        raise ValueError("channel does not belong to a guild.")
     raise ValueError("guild_id or channel_id is required.")
 
 
-def _is_messageable(channel: Any) -> bool:
-    return hasattr(channel, "history")
+def _is_messageable(channel: ResolvedChannel) -> TypeGuard[discord.abc.Messageable]:
+    return isinstance(channel, discord.abc.Messageable)
 
 
-def _channel_type_name(channel: Any) -> str:
+def _channel_type_name(channel: ResolvedChannel) -> str:
     type_obj = getattr(channel, "type", None)
     if type_obj is None:
         return "unknown"
@@ -106,11 +104,11 @@ def _channel_type_name(channel: Any) -> str:
     return name or str(type_obj)
 
 
-def _normalize_query(query: Any) -> str:
+def _normalize_query(query: object | None) -> str:
     return str(query).strip() if query is not None else ""
 
 
-def _compile_query(query: str, *, regex: bool, case_sensitive: bool) -> Optional[re.Pattern]:
+def _compile_query(query: str, *, regex: bool, case_sensitive: bool) -> re.Pattern[str] | None:
     if not query or not regex:
         return None
     flags = 0 if case_sensitive else re.IGNORECASE
@@ -126,7 +124,7 @@ def _text_matches(
     *,
     regex: bool,
     case_sensitive: bool,
-    rx: Optional[re.Pattern],
+    rx: re.Pattern[str] | None,
     match: str = "substring",
 ) -> bool:
     text = text or ""
@@ -150,7 +148,7 @@ def _text_matches(
     return query in text
 
 
-def _author_payload(author: Any) -> Optional[Dict[str, Any]]:
+def _author_payload(author: discord.abc.User | None) -> JSONDict | None:
     if author is None:
         return None
     return {
@@ -162,7 +160,7 @@ def _author_payload(author: Any) -> Optional[Dict[str, Any]]:
     }
 
 
-def _message_payload(message: discord.Message, max_content_chars: int) -> Dict[str, Any]:
+def _message_payload(message: discord.Message, max_content_chars: int) -> JSONDict:
     content = message.content or ""
     if max_content_chars == 0:
         content = ""
@@ -189,8 +187,8 @@ def _message_payload(message: discord.Message, max_content_chars: int) -> Dict[s
     }
 
 
-def _member_payload(member: discord.Member, include_roles: bool) -> Dict[str, Any]:
-    payload: Dict[str, Any] = {
+def _member_payload(member: discord.Member, include_roles: bool) -> JSONDict:
+    payload: JSONDict = {
         "member_id": str(member.id),
         "name": member.name,
         "display_name": member.display_name,
@@ -200,22 +198,20 @@ def _member_payload(member: discord.Member, include_roles: bool) -> Dict[str, An
         "mention": member.mention,
         "joined_at": _to_iso(getattr(member, "joined_at", None)),
         "created_at": _to_iso(getattr(member, "created_at", None)),
-        "avatar_url": str(member.display_avatar.url) if getattr(member, "display_avatar", None) else None,
+        "avatar_url": (str(member.display_avatar.url) if getattr(member, "display_avatar", None) else None),
     }
     if include_roles:
-        payload["roles"] = [
-            {"id": str(role.id), "name": role.name} for role in getattr(member, "roles", [])
-        ]
+        payload["roles"] = [{"id": str(role.id), "name": role.name} for role in getattr(member, "roles", [])]
     return payload
 
 
-def _channel_payload(channel: Any) -> Dict[str, Any]:
+def _channel_payload(channel: discord.abc.GuildChannel | discord.Thread) -> JSONDict:
     return {
         "channel_id": str(channel.id),
         "name": getattr(channel, "name", None),
         "type": _channel_type_name(channel),
         "guild_id": str(channel.guild.id) if getattr(channel, "guild", None) else None,
-        "parent_id": str(getattr(channel, "parent_id", None)) if getattr(channel, "parent_id", None) else None,
+        "parent_id": (str(getattr(channel, "parent_id", None)) if getattr(channel, "parent_id", None) else None),
         "topic": getattr(channel, "topic", None),
         "nsfw": getattr(channel, "nsfw", None),
         "position": getattr(channel, "position", None),
@@ -230,7 +226,7 @@ async def discord_search_messages(ctx: GlobalContext, obj: JSON) -> JSONDict:
     client = _get_client(ctx)
     await client.wait_until_ready()
 
-    channel_ids: List[str] = []
+    channel_ids: list[str] = []
     if obj.get("channel_ids") is not None:
         if not isinstance(obj["channel_ids"], list):
             raise ValueError("channel_ids must be a list of strings.")
@@ -241,11 +237,17 @@ async def discord_search_messages(ctx: GlobalContext, obj: JSON) -> JSONDict:
     if not channel_ids:
         raise ValueError("channel_id or channel_ids is required.")
 
-    seen = set()
-    channel_ids = [cid for cid in channel_ids if not (cid in seen or seen.add(cid))]
+    seen: set[str] = set()
+    unique_channel_ids: list[str] = []
+    for cid in channel_ids:
+        if cid in seen:
+            continue
+        seen.add(cid)
+        unique_channel_ids.append(cid)
+    channel_ids = unique_channel_ids
 
     max_channels = _clamp(
-        _coerce_int(obj.get("max_channels"), DEFAULT_MAX_CHANNELS),
+        coerce_int(obj.get("max_channels"), DEFAULT_MAX_CHANNELS),
         1,
         MAX_CHANNELS,
     )
@@ -253,16 +255,16 @@ async def discord_search_messages(ctx: GlobalContext, obj: JSON) -> JSONDict:
     channel_ids = channel_ids[:max_channels]
 
     max_results = _clamp(
-        _coerce_int(obj.get("max_results"), DEFAULT_MESSAGE_MAX_RESULTS),
+        coerce_int(obj.get("max_results"), DEFAULT_MESSAGE_MAX_RESULTS),
         1,
         MAX_MESSAGE_RESULTS,
     )
     scan_limit = _clamp(
-        _coerce_int(obj.get("scan_limit"), DEFAULT_MESSAGE_SCAN_LIMIT),
+        coerce_int(obj.get("scan_limit"), DEFAULT_MESSAGE_SCAN_LIMIT),
         1,
         MAX_MESSAGE_SCAN_LIMIT,
     )
-    max_content_chars = _coerce_int(obj.get("max_content_chars"), DEFAULT_MAX_CONTENT_CHARS)
+    max_content_chars = coerce_int(obj.get("max_content_chars"), DEFAULT_MAX_CONTENT_CHARS)
     if max_content_chars < 0:
         max_content_chars = MAX_CONTENT_CHARS
     max_content_chars = _clamp(max_content_chars, 0, MAX_CONTENT_CHARS)
@@ -270,13 +272,13 @@ async def discord_search_messages(ctx: GlobalContext, obj: JSON) -> JSONDict:
     query = _normalize_query(obj.get("query"))
     regex = bool(obj.get("regex", False))
     case_sensitive = bool(obj.get("case_sensitive", False))
-    author_id = obj.get("author_id")
+    author_id = coerce_optional_str(obj.get("author_id"))
     include_bots = bool(obj.get("include_bots", True))
     oldest_first = bool(obj.get("oldest_first", False))
 
-    before_id = obj.get("before_message_id")
-    after_id = obj.get("after_message_id")
-    around_id = obj.get("around_message_id")
+    before_id = coerce_optional_str(obj.get("before_message_id"))
+    after_id = coerce_optional_str(obj.get("after_message_id"))
+    around_id = coerce_optional_str(obj.get("around_message_id"))
     if around_id and (before_id or after_id):
         raise ValueError("around_message_id cannot be combined with before/after.")
 
@@ -286,8 +288,8 @@ async def discord_search_messages(ctx: GlobalContext, obj: JSON) -> JSONDict:
 
     rx = _compile_query(query, regex=regex, case_sensitive=case_sensitive)
 
-    results: List[Dict[str, Any]] = []
-    errors: List[Dict[str, Any]] = []
+    results: list[JSONDict] = []
+    errors: list[JSONDict] = []
     messages_scanned = 0
     channels_scanned = 0
     truncated = False
@@ -350,8 +352,8 @@ async def discord_search_messages(ctx: GlobalContext, obj: JSON) -> JSONDict:
         "channels_truncated": channels_truncated,
         "messages_returned": len(results),
         "truncated": truncated,
-        "results": results,
-        "errors": errors,
+        "results": obj_to_json(results),
+        "errors": obj_to_json(errors),
     }
 
 
@@ -364,31 +366,31 @@ async def discord_search_members(ctx: GlobalContext, obj: JSON) -> JSONDict:
 
     guild = await _resolve_guild(
         client,
-        guild_id=obj.get("guild_id"),
-        channel_id=obj.get("channel_id"),
+        guild_id=coerce_optional_str(obj.get("guild_id")),
+        channel_id=coerce_optional_str(obj.get("channel_id")),
     )
 
     query = _normalize_query(obj.get("query"))
-    match = obj.get("match", "substring")
+    match = coerce_optional_str(obj.get("match")) or "substring"
     case_sensitive = bool(obj.get("case_sensitive", False))
     include_bots = bool(obj.get("include_bots", True))
     include_roles = bool(obj.get("include_roles", False))
-    role_id = obj.get("role_id")
+    role_id = coerce_optional_str(obj.get("role_id"))
 
     max_results = _clamp(
-        _coerce_int(obj.get("max_results"), DEFAULT_MEMBER_MAX_RESULTS),
+        coerce_int(obj.get("max_results"), DEFAULT_MEMBER_MAX_RESULTS),
         1,
         MAX_MEMBER_RESULTS,
     )
     scan_limit = _clamp(
-        _coerce_int(obj.get("scan_limit"), DEFAULT_MEMBER_SCAN_LIMIT),
+        coerce_int(obj.get("scan_limit"), DEFAULT_MEMBER_SCAN_LIMIT),
         1,
         MAX_MEMBER_SCAN_LIMIT,
     )
 
     rx = _compile_query(query, regex=(match == "regex"), case_sensitive=case_sensitive)
 
-    results: List[Dict[str, Any]] = []
+    results: list[JSONDict] = []
     members_scanned = 0
     truncated = False
 
@@ -420,12 +422,12 @@ async def discord_search_members(ctx: GlobalContext, obj: JSON) -> JSONDict:
             "members_scanned": 1,
             "members_returned": len(results),
             "truncated": False,
-            "results": results,
+            "results": obj_to_json(results),
         }
 
     use_cache = bool(obj.get("use_cache", True))
 
-    async def _iter_members() -> Iterable[discord.Member]:
+    async def _iter_members() -> AsyncIterator[discord.Member]:
         if use_cache and getattr(guild, "members", None):
             for member in guild.members:
                 yield member
@@ -481,7 +483,7 @@ async def discord_search_members(ctx: GlobalContext, obj: JSON) -> JSONDict:
         "members_scanned": members_scanned,
         "members_returned": len(results),
         "truncated": truncated,
-        "results": results,
+        "results": obj_to_json(results),
     }
 
 
@@ -494,18 +496,18 @@ async def discord_search_channels(ctx: GlobalContext, obj: JSON) -> JSONDict:
 
     guild = await _resolve_guild(
         client,
-        guild_id=obj.get("guild_id"),
-        channel_id=obj.get("channel_id"),
+        guild_id=coerce_optional_str(obj.get("guild_id")),
+        channel_id=coerce_optional_str(obj.get("channel_id")),
     )
 
     query = _normalize_query(obj.get("query"))
-    match = obj.get("match", "substring")
+    match = coerce_optional_str(obj.get("match")) or "substring"
     case_sensitive = bool(obj.get("case_sensitive", False))
     types = obj.get("types") or []
     type_filters = {str(t).lower() for t in types} if isinstance(types, list) else set()
 
     max_results = _clamp(
-        _coerce_int(obj.get("max_results"), DEFAULT_CHANNEL_MAX_RESULTS),
+        coerce_int(obj.get("max_results"), DEFAULT_CHANNEL_MAX_RESULTS),
         1,
         MAX_CHANNEL_RESULTS,
     )
@@ -518,7 +520,7 @@ async def discord_search_channels(ctx: GlobalContext, obj: JSON) -> JSONDict:
         _LOGGER.debug("fetch_channels failed: %s", e)
         channels = list(getattr(guild, "channels", []))
 
-    results: List[Dict[str, Any]] = []
+    results: list[JSONDict] = []
     for channel in channels:
         type_name = _channel_type_name(channel).lower()
         if type_filters and type_name not in type_filters:
@@ -552,10 +554,10 @@ async def discord_search_channels(ctx: GlobalContext, obj: JSON) -> JSONDict:
         "query": query,
         "match": match,
         "case_sensitive": case_sensitive,
-        "types": sorted(type_filters),
+        "types": obj_to_json(sorted(type_filters)),
         "max_results": max_results,
         "channels_returned": len(results),
-        "results": results,
+        "results": obj_to_json(results),
     }
 
 
@@ -571,28 +573,64 @@ discord_search_messages_schema: ToolDef = ToolDef(
         "parameters": {
             "type": "object",
             "properties": {
-                "query": {"type": "string", "description": "Substring or regex to match in message content."},
-                "channel_id": {"type": "string", "description": "Channel ID to search."},
+                "query": {
+                    "type": "string",
+                    "description": "Substring or regex to match in message content.",
+                },
+                "channel_id": {
+                    "type": "string",
+                    "description": "Channel ID to search.",
+                },
                 "channel_ids": {
                     "type": "array",
                     "items": {"type": "string"},
                     "description": "List of channel IDs to search.",
                 },
-                "author_id": {"type": "string", "description": "Only return messages from this author ID."},
-                "max_results": {"type": "integer", "description": "Maximum number of matching messages to return."},
-                "scan_limit": {"type": "integer", "description": "Maximum messages to scan per channel."},
-                "max_channels": {"type": "integer", "description": "Cap number of channels to scan."},
-                "before_message_id": {"type": "string", "description": "Only messages before this message ID."},
-                "after_message_id": {"type": "string", "description": "Only messages after this message ID."},
+                "author_id": {
+                    "type": "string",
+                    "description": "Only return messages from this author ID.",
+                },
+                "max_results": {
+                    "type": "integer",
+                    "description": "Maximum number of matching messages to return.",
+                },
+                "scan_limit": {
+                    "type": "integer",
+                    "description": "Maximum messages to scan per channel.",
+                },
+                "max_channels": {
+                    "type": "integer",
+                    "description": "Cap number of channels to scan.",
+                },
+                "before_message_id": {
+                    "type": "string",
+                    "description": "Only messages before this message ID.",
+                },
+                "after_message_id": {
+                    "type": "string",
+                    "description": "Only messages after this message ID.",
+                },
                 "around_message_id": {
                     "type": "string",
                     "description": "Messages around this message ID (exclusive with before/after).",
                 },
-                "oldest_first": {"type": "boolean", "description": "Search oldest-first instead of newest-first."},
+                "oldest_first": {
+                    "type": "boolean",
+                    "description": "Search oldest-first instead of newest-first.",
+                },
                 "regex": {"type": "boolean", "description": "Treat query as regex."},
-                "case_sensitive": {"type": "boolean", "description": "Case-sensitive matching."},
-                "include_bots": {"type": "boolean", "description": "Include bot-authored messages."},
-                "max_content_chars": {"type": "integer", "description": "Truncate message content in results (0 for empty)."},
+                "case_sensitive": {
+                    "type": "boolean",
+                    "description": "Case-sensitive matching.",
+                },
+                "include_bots": {
+                    "type": "boolean",
+                    "description": "Include bot-authored messages.",
+                },
+                "max_content_chars": {
+                    "type": "integer",
+                    "description": "Truncate message content in results (0 for empty).",
+                },
             },
         },
     },
@@ -612,21 +650,48 @@ discord_search_members_schema: ToolDef = ToolDef(
             "type": "object",
             "properties": {
                 "guild_id": {"type": "string", "description": "Guild ID to search."},
-                "channel_id": {"type": "string", "description": "Channel ID to infer guild."},
-                "query": {"type": "string", "description": "Search string to match against member names."},
+                "channel_id": {
+                    "type": "string",
+                    "description": "Channel ID to infer guild.",
+                },
+                "query": {
+                    "type": "string",
+                    "description": "Search string to match against member names.",
+                },
                 "match": {
                     "type": "string",
                     "description": "Match mode: substring, exact, or regex.",
                     "enum": ["substring", "exact", "regex"],
                 },
-                "case_sensitive": {"type": "boolean", "description": "Case-sensitive matching."},
-                "user_id": {"type": "string", "description": "Fetch a specific member by user ID."},
+                "case_sensitive": {
+                    "type": "boolean",
+                    "description": "Case-sensitive matching.",
+                },
+                "user_id": {
+                    "type": "string",
+                    "description": "Fetch a specific member by user ID.",
+                },
                 "role_id": {"type": "string", "description": "Filter by role ID."},
-                "include_bots": {"type": "boolean", "description": "Include bots in results."},
-                "include_roles": {"type": "boolean", "description": "Include role details in results."},
-                "use_cache": {"type": "boolean", "description": "Prefer cached members if available."},
-                "max_results": {"type": "integer", "description": "Maximum matching members to return."},
-                "scan_limit": {"type": "integer", "description": "Maximum members to scan."},
+                "include_bots": {
+                    "type": "boolean",
+                    "description": "Include bots in results.",
+                },
+                "include_roles": {
+                    "type": "boolean",
+                    "description": "Include role details in results.",
+                },
+                "use_cache": {
+                    "type": "boolean",
+                    "description": "Prefer cached members if available.",
+                },
+                "max_results": {
+                    "type": "integer",
+                    "description": "Maximum matching members to return.",
+                },
+                "scan_limit": {
+                    "type": "integer",
+                    "description": "Maximum members to scan.",
+                },
             },
         },
     },
@@ -646,20 +711,32 @@ discord_search_channels_schema: ToolDef = ToolDef(
             "type": "object",
             "properties": {
                 "guild_id": {"type": "string", "description": "Guild ID to search."},
-                "channel_id": {"type": "string", "description": "Channel ID to infer guild."},
-                "query": {"type": "string", "description": "Search string to match in channel names/topics."},
+                "channel_id": {
+                    "type": "string",
+                    "description": "Channel ID to infer guild.",
+                },
+                "query": {
+                    "type": "string",
+                    "description": "Search string to match in channel names/topics.",
+                },
                 "match": {
                     "type": "string",
                     "description": "Match mode: substring, exact, or regex.",
                     "enum": ["substring", "exact", "regex"],
                 },
-                "case_sensitive": {"type": "boolean", "description": "Case-sensitive matching."},
+                "case_sensitive": {
+                    "type": "boolean",
+                    "description": "Case-sensitive matching.",
+                },
                 "types": {
                     "type": "array",
                     "items": {"type": "string"},
                     "description": "Optional channel type filters (e.g., text, voice, category).",
                 },
-                "max_results": {"type": "integer", "description": "Maximum matching channels to return."},
+                "max_results": {
+                    "type": "integer",
+                    "description": "Maximum matching channels to return.",
+                },
             },
         },
     },

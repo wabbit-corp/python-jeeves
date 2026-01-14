@@ -7,17 +7,17 @@ import math
 import sqlite3
 import threading
 import time
-from dataclasses import asdict, dataclass
+from collections.abc import Callable, Iterable
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, TypeVar
 
 from servant.defs import GlobalContext, ToolDef
-from servant.json import JSON, JSONDict
+from typed_json import JSON, JSONDict, coerce_float, coerce_int, coerce_str
 
-try:
+if TYPE_CHECKING:
+    import discord
     from sentence_transformers import SentenceTransformer
-except Exception:  # pragma: no cover - handled at runtime
-    SentenceTransformer = None  # type: ignore
 
 
 _LOGGER = logging.getLogger(__name__)
@@ -33,8 +33,9 @@ DEFAULT_CHANNEL_COOLDOWN_SECONDS = 15 * 60
 DEFAULT_MODEL_NAME = "all-MiniLM-L6-v2"
 
 _MODEL_LOCK = threading.Lock()
-_MODEL: Optional[Any] = None
-_MODEL_NAME: Optional[str] = None
+_MODEL: "SentenceTransformer | None" = None
+_MODEL_NAME: str | None = None
+T = TypeVar("T")
 
 
 def _db_path(ctx: GlobalContext) -> Path:
@@ -44,7 +45,7 @@ def _db_path(ctx: GlobalContext) -> Path:
     """
     raw = ctx.secrets.get("topic_subscriptions_db_path")
     if raw:
-        return Path(raw).expanduser().resolve()
+        return Path(coerce_str(raw, field="topic_subscriptions_db_path", allow_empty=False)).expanduser().resolve()
     return (Path.cwd() / DEFAULT_DB_FILENAME).resolve()
 
 
@@ -84,16 +85,11 @@ def _init_db(conn: sqlite3.Connection) -> None:
         """
     )
     conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_topic_subscriptions_guild_active "
-        "ON topic_subscriptions(status, guild_id);"
+        "CREATE INDEX IF NOT EXISTS idx_topic_subscriptions_guild_active " "ON topic_subscriptions(status, guild_id);"
     )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_topic_subscriptions_user " "ON topic_subscriptions(user_id);")
     conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_topic_subscriptions_user "
-        "ON topic_subscriptions(user_id);"
-    )
-    conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_topic_notifications_channel "
-        "ON topic_notification_cooldowns(channel_id);"
+        "CREATE INDEX IF NOT EXISTS idx_topic_notifications_channel " "ON topic_notification_cooldowns(channel_id);"
     )
     conn.commit()
 
@@ -102,75 +98,81 @@ def _now_ms() -> int:
     return int(time.time() * 1000)
 
 
-def _coerce_float(value: Any, default: float) -> float:
-    if value is None:
-        return default
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return default
-
-
-def _coerce_int(value: Any, default: int) -> int:
-    if value is None:
-        return default
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return default
+def _require_int(obj: JSONDict, key: str) -> int:
+    raw = obj.get(key)
+    if raw is None:
+        raise ValueError(f"{key} is required.")
+    if isinstance(raw, bool):
+        return int(raw)
+    if isinstance(raw, int):
+        return raw
+    if isinstance(raw, float):
+        return int(raw)
+    if isinstance(raw, str):
+        try:
+            return int(raw)
+        except ValueError as exc:
+            raise ValueError(f"{key} must be an integer.") from exc
+    raise ValueError(f"{key} must be an integer.")
 
 
 def _get_cooldown_seconds(ctx: GlobalContext) -> int:
     raw_seconds = ctx.secrets.get("topic_subscriptions_cooldown_seconds")
     if raw_seconds is not None:
-        return _coerce_int(raw_seconds, DEFAULT_CHANNEL_COOLDOWN_SECONDS)
+        return coerce_int(raw_seconds, DEFAULT_CHANNEL_COOLDOWN_SECONDS)
     raw_minutes = ctx.secrets.get("topic_subscriptions_cooldown_minutes")
     if raw_minutes is not None:
-        return _coerce_int(raw_minutes, DEFAULT_CHANNEL_COOLDOWN_SECONDS // 60) * 60
+        return coerce_int(raw_minutes, DEFAULT_CHANNEL_COOLDOWN_SECONDS // 60) * 60
     return DEFAULT_CHANNEL_COOLDOWN_SECONDS
 
 
-def _get_model(ctx: GlobalContext):
-    if SentenceTransformer is None:
+def _get_model(ctx: GlobalContext) -> "SentenceTransformer":
+    try:
+        from sentence_transformers import SentenceTransformer
+    except Exception as exc:  # pragma: no cover - handled at runtime
         raise RuntimeError(
-            "sentence_transformers is not installed. "
-            "Install it in the .venv to use topic subscriptions."
-        )
-    model_name = str(
-        ctx.secrets.get("topic_subscriptions_model_name") or DEFAULT_MODEL_NAME
-    )
+            "sentence_transformers is not installed. " "Install it in the .venv to use topic subscriptions."
+        ) from exc
+    model_name = str(ctx.secrets.get("topic_subscriptions_model_name") or DEFAULT_MODEL_NAME)
     global _MODEL, _MODEL_NAME
     with _MODEL_LOCK:
         if _MODEL is None or _MODEL_NAME != model_name:
             _LOGGER.info("Loading sentence_transformers model: %s", model_name)
             _MODEL = SentenceTransformer(model_name)
             _MODEL_NAME = model_name
+    if _MODEL is None:
+        raise RuntimeError("Failed to initialize sentence_transformers model.")
     return _MODEL
 
 
-def _normalize(vec: List[float]) -> List[float]:
+def _normalize(vec: list[float]) -> list[float]:
     norm = math.sqrt(sum(v * v for v in vec))
     if norm == 0:
         return vec
     return [v / norm for v in vec]
 
 
-def _embed_text(ctx: GlobalContext, text: str) -> List[float]:
+def _embed_text(ctx: GlobalContext, text: str) -> list[float]:
     model = _get_model(ctx)
     with _MODEL_LOCK:
         embedding = model.encode(text, show_progress_bar=False)
     if hasattr(embedding, "tolist"):
-        vec = embedding.tolist()
+        raw = embedding.tolist()
+        if not isinstance(raw, list):
+            raise ValueError("Embedding must be a list of numbers.")
+        vec = [float(v) for v in raw]
+    elif isinstance(embedding, Iterable):
+        vec = [float(v) for v in embedding]
     else:
-        vec = list(embedding)
-    return _normalize([float(v) for v in vec])
+        raise ValueError("Embedding must be iterable.")
+    return _normalize(vec)
 
 
-def _serialize_embedding(vec: List[float]) -> str:
+def _serialize_embedding(vec: list[float]) -> str:
     return json.dumps(vec, separators=(",", ":"))
 
 
-def _deserialize_embedding(raw: Any) -> Optional[List[float]]:
+def _deserialize_embedding(raw: object) -> list[float] | None:
     if raw is None:
         return None
     if isinstance(raw, list):
@@ -191,16 +193,16 @@ def _deserialize_embedding(raw: Any) -> Optional[List[float]]:
     return None
 
 
-def _cosine_similarity(vec_a: List[float], vec_b: List[float]) -> Optional[float]:
+def _cosine_similarity(vec_a: list[float], vec_b: list[float]) -> float | None:
     if len(vec_a) != len(vec_b):
         return None
     return sum(a * b for a, b in zip(vec_a, vec_b))
 
 
-async def _with_db(ctx: GlobalContext, fn):
+async def _with_db(ctx: GlobalContext, fn: Callable[[sqlite3.Connection], T]) -> T:
     dbfile = _db_path(ctx)
 
-    def _run():
+    def _run() -> T:
         dbfile.parent.mkdir(parents=True, exist_ok=True)
         conn = _connect(dbfile)
         try:
@@ -212,14 +214,14 @@ async def _with_db(ctx: GlobalContext, fn):
     return await asyncio.to_thread(_run)
 
 
-def _normalize_id(value: Any) -> Optional[str]:
+def _normalize_id(value: object) -> str | None:
     if value is None:
         return None
     text = str(value).strip()
     return text or None
 
 
-async def _infer_guild_id(ctx: GlobalContext, obj: Dict[str, Any]) -> Optional[str]:
+async def _infer_guild_id(ctx: GlobalContext, obj: JSONDict) -> str | None:
     guild_id = _normalize_id(obj.get("guild_id"))
     if guild_id:
         return guild_id
@@ -235,9 +237,7 @@ async def _infer_guild_id(ctx: GlobalContext, obj: Dict[str, Any]) -> Optional[s
     return await _lookup_guild_id_from_discord(ctx, channel_id)
 
 
-async def _lookup_guild_id_from_indexer(
-    ctx: GlobalContext, channel_id: str
-) -> Optional[str]:
+async def _lookup_guild_id_from_indexer(ctx: GlobalContext, channel_id: str) -> str | None:
     try:
         from servant.modules import background_indexer
     except Exception:
@@ -247,7 +247,7 @@ async def _lookup_guild_id_from_indexer(
     if not dbfile.exists():
         return None
 
-    def _run() -> Optional[str]:
+    def _run() -> str | None:
         conn = sqlite3.connect(str(dbfile))
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA busy_timeout=5000;")
@@ -279,10 +279,8 @@ async def _lookup_guild_id_from_indexer(
         return None
 
 
-async def _lookup_guild_id_from_discord(
-    ctx: GlobalContext, channel_id: str
-) -> Optional[str]:
-    client = getattr(ctx, "discord_client", None)
+async def _lookup_guild_id_from_discord(ctx: GlobalContext, channel_id: str) -> str | None:
+    client = ctx.discord_client
     if client is None:
         return None
 
@@ -330,9 +328,24 @@ def _row_to_subscription(r: sqlite3.Row) -> TopicSubscription:
     )
 
 
+def _subscription_payload(subscription: TopicSubscription) -> JSONDict:
+    return {
+        "id": subscription.id,
+        "user_id": subscription.user_id,
+        "guild_id": subscription.guild_id,
+        "channel_id": subscription.channel_id,
+        "topic": subscription.topic,
+        "similarity_threshold": subscription.similarity_threshold,
+        "status": subscription.status,
+        "created_at": subscription.created_at,
+        "updated_at": subscription.updated_at,
+    }
+
+
 # ----------------------------
 # Tool: create/update/cancel/list
 # ----------------------------
+
 
 async def topic_subscription_manage(ctx: GlobalContext, obj: JSON) -> JSONDict:
     if not isinstance(obj, dict):
@@ -342,7 +355,7 @@ async def topic_subscription_manage(ctx: GlobalContext, obj: JSON) -> JSONDict:
     if op not in {"create", "update", "cancel", "list"}:
         raise ValueError("operation must be one of: create, update, cancel, list")
 
-    resolved_guild_id: Optional[str] = None
+    resolved_guild_id: str | None = None
     if op == "create":
         resolved_guild_id = await _infer_guild_id(ctx, obj)
 
@@ -361,12 +374,8 @@ async def topic_subscription_manage(ctx: GlobalContext, obj: JSON) -> JSONDict:
             if not channel_id:
                 raise ValueError("channel_id is required for create.")
             if not guild_id:
-                raise ValueError(
-                    "guild_id is required for create (or provide channel_id in a guild)."
-                )
-            similarity_threshold = _coerce_float(
-                obj.get("similarity_threshold"), DEFAULT_SIMILARITY_THRESHOLD
-            )
+                raise ValueError("guild_id is required for create (or provide channel_id in a guild).")
+            similarity_threshold = coerce_float(obj.get("similarity_threshold"), DEFAULT_SIMILARITY_THRESHOLD)
 
             topic_embedding = _serialize_embedding(_embed_text(ctx, topic))
 
@@ -390,17 +399,23 @@ async def topic_subscription_manage(ctx: GlobalContext, obj: JSON) -> JSONDict:
                 ),
             )
             conn.commit()
-            sid = int(cur.lastrowid)
+            lastrowid = cur.lastrowid
+            if lastrowid is None:
+                raise RuntimeError("Failed to create subscription.")
+            sid = int(lastrowid)
             row = conn.execute(
                 "SELECT * FROM topic_subscriptions WHERE id = ?",
                 (sid,),
             ).fetchone()
-            return {"ok": True, "subscription": asdict(_row_to_subscription(row))}
+            return {
+                "ok": True,
+                "subscription": _subscription_payload(_row_to_subscription(row)),
+            }
 
         if op == "update":
-            sid = int(obj["subscription_id"])
-            sets: List[str] = []
-            params: List[Any] = []
+            sid = _require_int(obj, "subscription_id")
+            sets: list[str] = []
+            params: list[object] = []
 
             if "topic" in obj and obj["topic"] is not None:
                 topic = str(obj["topic"]).strip()
@@ -413,9 +428,7 @@ async def topic_subscription_manage(ctx: GlobalContext, obj: JSON) -> JSONDict:
 
             if "similarity_threshold" in obj and obj["similarity_threshold"] is not None:
                 sets.append("similarity_threshold = ?")
-                params.append(_coerce_float(
-                    obj.get("similarity_threshold"), DEFAULT_SIMILARITY_THRESHOLD
-                ))
+                params.append(coerce_float(obj.get("similarity_threshold"), DEFAULT_SIMILARITY_THRESHOLD))
 
             if "status" in obj and obj["status"] is not None:
                 sets.append("status = ?")
@@ -439,10 +452,13 @@ async def topic_subscription_manage(ctx: GlobalContext, obj: JSON) -> JSONDict:
             ).fetchone()
             if not row:
                 raise ValueError(f"Subscription id={sid} not found.")
-            return {"ok": True, "subscription": asdict(_row_to_subscription(row))}
+            return {
+                "ok": True,
+                "subscription": _subscription_payload(_row_to_subscription(row)),
+            }
 
         if op == "cancel":
-            sid = int(obj["subscription_id"])
+            sid = _require_int(obj, "subscription_id")
             cur = conn.execute(
                 """
                 UPDATE topic_subscriptions
@@ -459,12 +475,18 @@ async def topic_subscription_manage(ctx: GlobalContext, obj: JSON) -> JSONDict:
                 ).fetchone()
                 if not row:
                     raise ValueError(f"Subscription id={sid} not found.")
-                return {"ok": True, "subscription": asdict(_row_to_subscription(row))}
+                return {
+                    "ok": True,
+                    "subscription": _subscription_payload(_row_to_subscription(row)),
+                }
             row = conn.execute(
                 "SELECT * FROM topic_subscriptions WHERE id = ?",
                 (sid,),
             ).fetchone()
-            return {"ok": True, "subscription": asdict(_row_to_subscription(row))}
+            return {
+                "ok": True,
+                "subscription": _subscription_payload(_row_to_subscription(row)),
+            }
 
         # op == "list"
         where = []
@@ -487,7 +509,7 @@ async def topic_subscription_manage(ctx: GlobalContext, obj: JSON) -> JSONDict:
         ).fetchall()
         return {
             "ok": True,
-            "subscriptions": [asdict(_row_to_subscription(r)) for r in rows],
+            "subscriptions": [_subscription_payload(_row_to_subscription(r)) for r in rows],
         }
 
     return await _with_db(ctx, _logic)
@@ -514,7 +536,6 @@ topic_subscription_manage_tool: ToolDef = ToolDef(
                     "type": "integer",
                     "description": "Required for update/cancel.",
                 },
-
                 "topic": {"type": "string"},
                 "user_id": {"type": "string", "description": "Discord user id."},
                 "guild_id": {
@@ -524,11 +545,13 @@ topic_subscription_manage_tool: ToolDef = ToolDef(
                 "channel_id": {
                     "type": "string",
                     "description": (
-                        "Channel id where subscription was created "
-                        "(required for create if guild_id omitted)."
+                        "Channel id where subscription was created " "(required for create if guild_id omitted)."
                     ),
                 },
-                "similarity_threshold": {"type": "number", "description": "Defaults to 0.6."},
+                "similarity_threshold": {
+                    "type": "number",
+                    "description": "Defaults to 0.6.",
+                },
                 "status": {"type": "string", "enum": ["active", "cancelled"]},
             },
             "required": ["operation"],
@@ -541,6 +564,7 @@ topic_subscription_manage_tool: ToolDef = ToolDef(
 # Message handling
 # ----------------------------
 
+
 def _match_subscriptions(
     ctx: GlobalContext,
     *,
@@ -549,7 +573,7 @@ def _match_subscriptions(
     author_id: str,
     content: str,
     now_ms: int,
-) -> List[Dict[str, Any]]:
+) -> list[JSONDict]:
     dbfile = _db_path(ctx)
     dbfile.parent.mkdir(parents=True, exist_ok=True)
     conn = _connect(dbfile)
@@ -576,9 +600,7 @@ def _match_subscriptions(
             """,
             (channel_id,),
         ).fetchall()
-        cooldown_by_user = {
-            str(r["user_id"]): int(r["last_notified_at"]) for r in cooldown_rows
-        }
+        cooldown_by_user = {str(r["user_id"]): int(r["last_notified_at"]) for r in cooldown_rows}
 
         candidates = []
         for r in rows:
@@ -597,7 +619,7 @@ def _match_subscriptions(
 
         message_embedding = _embed_text(ctx, content)
 
-        matches_by_user: Dict[str, List[Dict[str, Any]]] = {}
+        matches_by_user: dict[str, list[JSONDict]] = {}
         for r in candidates:
             topic_embedding = _deserialize_embedding(r["topic_embedding"])
             if not topic_embedding:
@@ -605,19 +627,21 @@ def _match_subscriptions(
             similarity = _cosine_similarity(topic_embedding, message_embedding)
             if similarity is None:
                 continue
-            threshold = _coerce_float(
-                r["similarity_threshold"], DEFAULT_SIMILARITY_THRESHOLD
-            )
+            threshold = coerce_float(r["similarity_threshold"], DEFAULT_SIMILARITY_THRESHOLD)
             if similarity >= threshold:
                 user_id = str(r["user_id"])
                 matches_by_user.setdefault(user_id, []).append(
                     {"topic": str(r["topic"]), "similarity": float(similarity)}
                 )
 
-        notifications = []
+        notifications: list[JSONDict] = []
         for user_id, topics in matches_by_user.items():
-            topics.sort(key=lambda t: t["similarity"], reverse=True)
-            notifications.append({"user_id": user_id, "topics": topics})
+            topics.sort(
+                key=lambda t: coerce_float(t.get("similarity"), 0.0),
+                reverse=True,
+            )
+            topics_json: list[JSON] = [topic for topic in topics]
+            notifications.append({"user_id": user_id, "topics": topics_json})
         return notifications
     finally:
         conn.close()
@@ -629,9 +653,7 @@ def _truncate(text: str, limit: int) -> str:
     return text[: max(0, limit - 3)].rstrip() + "..."
 
 
-async def _record_cooldowns(
-    ctx: GlobalContext, *, channel_id: str, user_ids: List[str], now_ms: int
-) -> None:
+async def _record_cooldowns(ctx: GlobalContext, *, channel_id: str, user_ids: list[str], now_ms: int) -> None:
     if not user_ids:
         return
 
@@ -660,7 +682,7 @@ async def _send_dm(ctx: GlobalContext, user_id: str, content: str) -> None:
         user = await client.fetch_user(int(user_id))
         await user.send(content)
 
-    loop = getattr(ctx, "discord_loop", None)
+    loop = ctx.discord_loop
     if loop is None:
         raise RuntimeError("ctx.discord_loop not set yet (client not initialized).")
 
@@ -679,17 +701,16 @@ async def _send_dm(ctx: GlobalContext, user_id: str, content: str) -> None:
         fut.result()
 
 
-async def topic_subscriptions_handle_message(
-    ctx: GlobalContext, discord_message: Any
-) -> JSONDict:
-    if getattr(discord_message, "guild", None) is None:
+async def topic_subscriptions_handle_message(ctx: GlobalContext, discord_message: "discord.Message") -> JSONDict:
+    guild = getattr(discord_message, "guild", None)
+    if guild is None:
         return {"ok": True, "notified": 0}
 
     content = (getattr(discord_message, "content", "") or "").strip()
     if not content:
         return {"ok": True, "notified": 0}
 
-    guild_id = str(discord_message.guild.id)
+    guild_id = str(guild.id)
     channel_id = str(discord_message.channel.id)
     author_id = str(discord_message.author.id)
     now_ms = _now_ms()
@@ -715,16 +736,19 @@ async def topic_subscriptions_handle_message(
     if not notifications:
         return {"ok": True, "notified": 0}
 
-    guild_name = str(discord_message.guild.name)
-    author_name = str(getattr(discord_message.author, "display_name", None)
-                      or getattr(discord_message.author, "name", "unknown"))
+    guild_name = str(guild.name)
+    author_name = str(
+        getattr(discord_message.author, "display_name", None) or getattr(discord_message.author, "name", "unknown")
+    )
     jump_url = getattr(discord_message, "jump_url", None)
     snippet = _truncate(content.replace("\n", " "), 500)
 
-    notified_users: List[str] = []
+    notified_users: list[str] = []
     for note in notifications:
-        user_id = note["user_id"]
-        topics = note.get("topics") or []
+        user_id = str(note.get("user_id"))
+        topics = note.get("topics")
+        if not isinstance(topics, list):
+            topics = []
 
         lines = []
         lines.append(f"Topic match in {guild_name} <#{channel_id}>")
@@ -732,9 +756,11 @@ async def topic_subscriptions_handle_message(
         if topics:
             lines.append("Matched topics:")
             for topic in topics[:5]:
-                lines.append(
-                    f"- {topic['topic']} (score {topic['similarity']:.2f})"
-                )
+                if not isinstance(topic, dict):
+                    continue
+                topic_name = str(topic.get("topic", ""))
+                similarity = coerce_float(topic.get("similarity"), 0.0)
+                lines.append(f"- {topic_name} (score {similarity:.2f})")
         lines.append("")
         lines.append(snippet or "(no message content)")
         if jump_url:

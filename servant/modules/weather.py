@@ -1,10 +1,7 @@
 import aiohttp
-import asyncio
-from typing import Optional
-from dataclasses import dataclass, field
-from typing import List
-from servant.defs import ToolDef, GlobalContext
-from servant.json import JSONDict, obj_to_json
+
+from servant.defs import GlobalContext, ToolDef
+from typed_json import JSON, JSONDict, coerce_float_strict, obj_to_json
 
 # https://open-meteo.com/
 
@@ -25,32 +22,18 @@ async def fetch_weather_forecast(latitude: float, longitude: float) -> JSONDict:
             result = {
                 "latitude": r["latitude"],
                 "longitude": r["longitude"],
-                "temperature_2m": str(r["current"]["temperature_2m"])
-                + " "
-                + r["current_units"]["temperature_2m"],
+                "temperature_2m": str(r["current"]["temperature_2m"]) + " " + r["current_units"]["temperature_2m"],
                 "apparent_temperature": str(r["current"]["apparent_temperature"])
                 + " "
                 + r["current_units"]["apparent_temperature"],
                 "is_day": True if r["current"]["is_day"] == 1 else False,
-                "precipitation": str(r["current"]["precipitation"])
-                + " "
-                + r["current_units"]["precipitation"],
+                "precipitation": str(r["current"]["precipitation"]) + " " + r["current_units"]["precipitation"],
                 "rain": str(r["current"]["rain"]) + " " + r["current_units"]["rain"],
-                "showers": str(r["current"]["showers"])
-                + " "
-                + r["current_units"]["showers"],
-                "snowfall": str(r["current"]["snowfall"])
-                + " "
-                + r["current_units"]["snowfall"],
-                "cloud_cover": str(r["current"]["cloud_cover"])
-                + " "
-                + r["current_units"]["cloud_cover"],
-                "wind_speed_10m": str(r["current"]["wind_speed_10m"])
-                + " "
-                + r["current_units"]["wind_speed_10m"],
-                "wind_gusts_10m": str(r["current"]["wind_gusts_10m"])
-                + " "
-                + r["current_units"]["wind_gusts_10m"],
+                "showers": str(r["current"]["showers"]) + " " + r["current_units"]["showers"],
+                "snowfall": str(r["current"]["snowfall"]) + " " + r["current_units"]["snowfall"],
+                "cloud_cover": str(r["current"]["cloud_cover"]) + " " + r["current_units"]["cloud_cover"],
+                "wind_speed_10m": str(r["current"]["wind_speed_10m"]) + " " + r["current_units"]["wind_speed_10m"],
+                "wind_gusts_10m": str(r["current"]["wind_gusts_10m"]) + " " + r["current_units"]["wind_gusts_10m"],
             }
 
             return result
@@ -65,11 +48,25 @@ async def get_current_weather(latitude: float, longitude: float) -> JSONDict:
     return r
 
 
+def _extract_location(obj: JSON) -> tuple[float, float]:
+    if not isinstance(obj, dict):
+        raise ValueError("Input must be an object.")
+    location = obj.get("location")
+    if not isinstance(location, dict):
+        raise ValueError("location must be an object.")
+    latitude = coerce_float_strict(location.get("latitude"), "latitude")
+    longitude = coerce_float_strict(location.get("longitude"), "longitude")
+    return latitude, longitude
+
+
+async def _get_current_weather_tool(_ctx: GlobalContext, obj: JSON) -> JSONDict:
+    latitude, longitude = _extract_location(obj)
+    return await get_current_weather(latitude, longitude)
+
+
 get_current_weather_schema: ToolDef = ToolDef(
     name="get_current_weather",
-    function=lambda ctx, obj: get_current_weather(
-        obj["location"]["latitude"], obj["location"]["longitude"]
-    ),
+    function=_get_current_weather_tool,
     schema={
         "name": "get_current_weather",
         "description": "Get the current weather in a given location. Specify the location as precisely as possible.",

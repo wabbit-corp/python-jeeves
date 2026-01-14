@@ -1,10 +1,10 @@
-from servant.json import JSONDict, obj_to_json
-from servant.defs import ToolDef
+from typed_json import JSON, JSONDict, coerce_float_strict
+from servant.defs import GlobalContext, ToolDef
 
 # Today's date
 import datetime
-import timezonefinder, pytz
-from tzwhere import tzwhere
+import timezonefinder
+import pytz
 
 tf = timezonefinder.TimezoneFinder()
 
@@ -28,12 +28,25 @@ async def get_current_datetime(longitude: float, latitude: float) -> JSONDict:
     return {"date": date_str, "time": time_str, "timezone": tzname}
 
 
+def _extract_location(obj: JSON) -> tuple[float, float]:
+    if not isinstance(obj, dict):
+        raise ValueError("Input must be an object.")
+    location = obj.get("location")
+    if not isinstance(location, dict):
+        raise ValueError("location must be an object.")
+    longitude = coerce_float_strict(location.get("longitude"), "longitude")
+    latitude = coerce_float_strict(location.get("latitude"), "latitude")
+    return longitude, latitude
+
+
+async def _get_current_datetime_tool(_ctx: GlobalContext, obj: JSON) -> JSONDict:
+    longitude, latitude = _extract_location(obj)
+    return await get_current_datetime(longitude, latitude)
+
+
 get_current_weather_schema: ToolDef = ToolDef(
     name="get_current_datetime",
-    function=lambda ctx, obj: get_current_datetime(
-        obj["location"]["longitude"],
-        obj["location"]["latitude"]
-    ),
+    function=_get_current_datetime_tool,
     schema={
         "name": "get_current_datetime",
         "description": "Get the current date & time in a given location. Specify the location as precisely as possible.",

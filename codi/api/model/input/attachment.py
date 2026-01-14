@@ -1,0 +1,90 @@
+from __future__ import annotations
+
+import builtins
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .message import Message
+
+
+class Attachment:
+    """
+    This class represents an attachment in a message.
+    """
+
+    def __init__(self):
+        self._url: str | None = None
+        self._message: Message | None = None
+
+    def __repr__(self):
+        return self.__str__()
+
+    def __str__(self):
+        return f"{self.__class__}: {self._url}"
+
+    def _get_url(self) -> str:
+        """
+        :type: str
+        """
+        assert self._url is not None
+        return self._url
+
+    def _set_url(self, url: str) -> None:
+        """
+        Set the URL of the attachment.
+
+        :param url: The URL of the attachment
+        """
+        self._url = url
+
+    url = builtins.property(_get_url, _set_url)
+
+    def _get_message(self) -> Message:
+        """
+        :type: Message
+        """
+        assert self._message is not None
+        return self._message
+
+    def _set_message(self, message: Message) -> None:
+        """
+        Set the message of the attachment.
+
+        :param message: The message of the attachment
+        """
+        self._message = message
+
+    message = builtins.property(_get_message, _set_message)
+
+    def deserialize(
+        self,
+        url: str | None = None,
+        message: Message | None = None,
+    ) -> Attachment:
+        """
+        Deserialize an attachment into an Attachment object.
+
+        :param url: The URL of the attachment
+        :param message: The message of the attachment
+        :return: The deserialized attachment
+        """
+
+        self._url = url
+        self._message = message
+
+        return self
+
+    @classmethod
+    def retrieve_attachments(
+        cls,
+        attachments: list[dict[str, str]],
+        message: Message,
+    ) -> list[Attachment]:
+        """
+        Retrieve a list of attachments from a dictionary.
+
+        :param attachments: The dictionary containing the attachments
+        :param message: The message of the attachments
+        :return: The list of attachments
+        """
+        return [Attachment().deserialize(attachment["url"], message) for attachment in attachments]

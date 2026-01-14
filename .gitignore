@@ -4,6 +4,9 @@
 *.pyd
 __pycache__/
 .mypy_cache/
+.pyre
+.pytest_cache/
+.ruff_cache/
 /.private.yml
 /servant_commitments.sqlite3
 .venv/
@@ -12,3 +15,5 @@ __pycache__/
 /*.sqlite3-shm
 cache.db
 all_memes.json
+/data/
+/CODI_repo/

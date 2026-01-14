@@ -1,0 +1,18 @@
+{
+  "include": ["servant", "typed_json", "codi", "tests", "servant_app.py"],
+  "exclude": [
+    ".venv",
+    ".git",
+    "__pycache__",
+    ".mypy_cache",
+    ".pytest_cache",
+    "data",
+    "datasets"
+  ],
+  "stubPath": "stubs",
+  "typeCheckingMode": "basic",
+  "reportMissingTypeStubs": "none",
+  "reportMissingImports": "none",
+  "reportUndefinedVariable": "error",
+  "reportUnboundVariable": "error"
+}

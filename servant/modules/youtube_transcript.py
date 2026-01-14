@@ -4,10 +4,16 @@ import csv
 import io
 import json
 import re
+from collections.abc import Callable, Iterable
+from typing import Protocol, TYPE_CHECKING, TypeGuard, TypedDict
 from urllib.parse import parse_qs, urlparse
 
 from servant.defs import ToolDef
-from servant.json import JSONDict
+from typed_json import JSON, JSONDict, coerce_float, coerce_optional_str
+
+if TYPE_CHECKING:
+    from requests import Session
+    from youtube_transcript_api.proxies import ProxyConfig
 
 MODULE_PROMPT = """
 ## YouTube Transcripts
@@ -19,6 +25,71 @@ ID_RE = re.compile(r"[0-9A-Za-z_-]{11}")
 
 class _NeverMatch(Exception):
     pass
+
+
+class TranscriptSegment(TypedDict):
+    start: float
+    duration: float
+    text: str
+
+
+class TranscriptMeta(TypedDict):
+    translated: bool
+    origin_lang: str
+    origin_type: str | None
+
+
+class _TranscriptFetchResult(Protocol):
+    def to_raw_data(self) -> list[dict[str, object]]: ...
+
+
+class _TranscriptItem(Protocol):
+    is_generated: bool
+    is_translatable: bool
+    language_code: str
+
+    def translate(self, language: str) -> "_TranscriptItem": ...
+
+    def fetch(self, preserve_formatting: bool = False) -> _TranscriptFetchResult: ...
+
+
+class _TranscriptApi(Protocol):
+    def fetch(
+        self,
+        video_id: str,
+        languages: Iterable[str] = ("en",),
+        preserve_formatting: bool = False,
+    ) -> _TranscriptFetchResult: ...
+
+    def list(self, video_id: str) -> Iterable[object]: ...
+
+
+class _TranscriptApiFactory(Protocol):
+    def __call__(
+        self,
+        proxy_config: "ProxyConfig | None" = None,
+        http_client: "Session | None" = None,
+    ) -> _TranscriptApi: ...
+
+
+class _WebshareProxyConfigFactory(Protocol):
+    def __call__(
+        self,
+        proxy_username: str,
+        proxy_password: str,
+        filter_ip_locations: list[str] | None = None,
+        retries_when_blocked: int = 10,
+        domain_name: str = "p.webshare.io",
+        proxy_port: int = 80,
+    ) -> "ProxyConfig": ...
+
+
+class _GenericProxyConfigFactory(Protocol):
+    def __call__(
+        self,
+        http_url: str | None = None,
+        https_url: str | None = None,
+    ) -> "ProxyConfig": ...
 
 
 def extract_video_id(url_or_id: str) -> str:
@@ -64,7 +135,7 @@ def _to_vtt_timestamp(seconds: float) -> str:
     return f"{h:02}:{m:02}:{s:02}.{ms:03}"
 
 
-def segments_to_txt(segments, with_timestamps: bool) -> str:
+def segments_to_txt(segments: list[TranscriptSegment], with_timestamps: bool) -> str:
     if with_timestamps:
         lines = []
         for seg in segments:
@@ -75,7 +146,7 @@ def segments_to_txt(segments, with_timestamps: bool) -> str:
     return " ".join(pieces) + "\n"
 
 
-def segments_to_srt(segments) -> str:
+def segments_to_srt(segments: list[TranscriptSegment]) -> str:
     out = []
     for i, seg in enumerate(segments, 1):
         start = seg["start"]
@@ -89,7 +160,7 @@ def segments_to_srt(segments) -> str:
     return "\n".join(out).strip() + "\n"
 
 
-def segments_to_vtt(segments) -> str:
+def segments_to_vtt(segments: list[TranscriptSegment]) -> str:
     lines = ["WEBVTT", ""]
     for seg in segments:
         start = seg["start"]
@@ -102,7 +173,7 @@ def segments_to_vtt(segments) -> str:
     return "\n".join(lines).strip() + "\n"
 
 
-def segments_to_csv(segments) -> str:
+def segments_to_csv(segments: list[TranscriptSegment]) -> str:
     buf = io.StringIO()
     w = csv.writer(buf)
     w.writerow(["start", "end", "text"])
@@ -113,120 +184,167 @@ def segments_to_csv(segments) -> str:
     return buf.getvalue()
 
 
-def _load_yta():
+def _coerce_segments(
+    raw_segments: list[dict[str, object]],
+) -> list[TranscriptSegment]:
+    segments: list[TranscriptSegment] = []
+    for item in raw_segments:
+        text_val = item.get("text")
+        if text_val is None:
+            continue
+        segments.append(
+            {
+                "start": coerce_float(item.get("start"), 0.0),
+                "duration": coerce_float(item.get("duration"), 0.0),
+                "text": str(text_val),
+            }
+        )
+    return segments
+
+
+def _is_transcript_item(item: object) -> TypeGuard[_TranscriptItem]:
+    return (
+        hasattr(item, "is_generated")
+        and hasattr(item, "is_translatable")
+        and hasattr(item, "language_code")
+        and hasattr(item, "translate")
+        and hasattr(item, "fetch")
+    )
+
+
+def _load_yta() -> tuple[object, _TranscriptApiFactory]:
     try:
         import youtube_transcript_api as yta
         from youtube_transcript_api import YouTubeTranscriptApi
     except Exception as exc:
         raise RuntimeError(
-            "youtube-transcript-api>=1.2.0 is required. "
-            "Install with: pip install -U youtube-transcript-api"
+            "youtube-transcript-api>=1.2.0 is required. " "Install with: pip install -U youtube-transcript-api"
         ) from exc
-    return yta, YouTubeTranscriptApi
+
+    def _factory(
+        proxy_config: "ProxyConfig | None" = None,
+        http_client: "Session | None" = None,
+    ) -> _TranscriptApi:
+        return YouTubeTranscriptApi(proxy_config=proxy_config, http_client=http_client)
+
+    return yta, _factory
 
 
-def _load_proxy_types():
+def _load_proxy_types() -> tuple[_WebshareProxyConfigFactory | None, _GenericProxyConfigFactory | None]:
     try:
-        from youtube_transcript_api.proxies import WebshareProxyConfig, GenericProxyConfig
+        from youtube_transcript_api.proxies import (
+            WebshareProxyConfig,
+            GenericProxyConfig,
+        )
     except Exception:
-        WebshareProxyConfig = GenericProxyConfig = None
+        return None, None
     return WebshareProxyConfig, GenericProxyConfig
 
 
-def _build_api(YouTubeTranscriptApi, opts: dict) -> object:
-    proxy_config = None
+def _build_api(YouTubeTranscriptApi: _TranscriptApiFactory, opts: JSONDict) -> _TranscriptApi:
+    proxy_config: ProxyConfig | None = None
     WebshareProxyConfig, GenericProxyConfig = _load_proxy_types()
-    webshare_user = opts.get("webshare_user")
-    webshare_pass = opts.get("webshare_pass")
-    webshare_locations = opts.get("webshare_locations")
+    webshare_user = coerce_optional_str(opts.get("webshare_user"))
+    webshare_pass = coerce_optional_str(opts.get("webshare_pass"))
+    webshare_locations_raw = opts.get("webshare_locations")
+    webshare_locations: list[str] | None
+    if isinstance(webshare_locations_raw, list):
+        webshare_locations = [str(item) for item in webshare_locations_raw]
+    else:
+        webshare_locations = None
     if webshare_user and webshare_pass and WebshareProxyConfig:
         proxy_config = WebshareProxyConfig(
             proxy_username=webshare_user,
             proxy_password=webshare_pass,
             filter_ip_locations=webshare_locations or None,
         )
-    elif (
-        opts.get("http_proxy") or opts.get("https_proxy") or opts.get("socks_proxy")
-    ) and GenericProxyConfig:
+    elif (opts.get("http_proxy") or opts.get("https_proxy") or opts.get("socks_proxy")) and GenericProxyConfig:
         proxy_config = GenericProxyConfig(
-            http_url=opts.get("http_proxy") or None,
-            https_url=opts.get("https_proxy") or None,
-            socks_url=opts.get("socks_proxy") or None,
+            http_url=coerce_optional_str(opts.get("http_proxy")),
+            https_url=coerce_optional_str(opts.get("https_proxy")),
         )
     return YouTubeTranscriptApi(proxy_config=proxy_config)
 
 
 def fetch_english_transcript(
-    api, video_id: str, preserve_formatting: bool, NoTranscriptFound
-):
+    api: _TranscriptApi,
+    video_id: str,
+    preserve_formatting: bool,
+    no_transcript_exc: type[BaseException],
+) -> tuple[list[TranscriptSegment], TranscriptMeta]:
     """
     Try English first; else translate any available transcript to English.
     Returns (segments_raw_list, meta_dict).
     """
     try:
-        ft = api.fetch(
-            video_id, languages=["en"], preserve_formatting=preserve_formatting
-        )
-        return ft.to_raw_data(), {
+        ft = api.fetch(video_id, languages=["en"], preserve_formatting=preserve_formatting)
+        return _coerce_segments(ft.to_raw_data()), {
             "translated": False,
             "origin_lang": "en",
             "origin_type": None,
         }
-    except NoTranscriptFound:
+    except no_transcript_exc:
         pass
 
     tlist = api.list(video_id)
-    manual = [t for t in tlist if not t.is_generated and t.is_translatable]
-    auto = [t for t in tlist if t.is_generated and t.is_translatable]
+    items = [t for t in tlist if _is_transcript_item(t)]
+    manual = [t for t in items if not t.is_generated and t.is_translatable]
+    auto = [t for t in items if t.is_generated and t.is_translatable]
     for t in manual + auto:
         tr = t.translate("en")
         ft = tr.fetch(preserve_formatting=preserve_formatting)
-        return ft.to_raw_data(), {
+        return _coerce_segments(ft.to_raw_data()), {
             "translated": True,
             "origin_lang": t.language_code,
             "origin_type": "auto" if t.is_generated else "manual",
         }
 
-    raise NoTranscriptFound("No transcript translatable to English was found.")
+    raise no_transcript_exc("No transcript translatable to English was found.")
 
 
-async def get_youtube_transcript(opts: dict) -> JSONDict:
-    url = opts.get("url") or ""
-    fmt = (opts.get("format") or "txt").lower()
-    timestamps = bool(opts.get("timestamps", False))
-    preserve_formatting = bool(opts.get("preserve_formatting", False))
+def _expect_dict(value: JSON) -> JSONDict:
+    if not isinstance(value, dict):
+        raise ValueError("Input must be an object.")
+    return value
+
+
+def _exception_type(yta: object, name: str) -> type[BaseException]:
+    exc = getattr(yta, name, _NeverMatch)
+    if isinstance(exc, type) and issubclass(exc, BaseException):
+        return exc
+    return _NeverMatch
+
+
+async def get_youtube_transcript(opts: JSON) -> JSONDict:
+    opts_dict = _expect_dict(opts)
+    url = str(opts_dict.get("url") or "")
+    fmt = str(opts_dict.get("format") or "txt").lower()
+    timestamps = bool(opts_dict.get("timestamps", False))
+    preserve_formatting = bool(opts_dict.get("preserve_formatting", False))
 
     video_id = extract_video_id(url)
     yta, YouTubeTranscriptApi = _load_yta()
 
-    TranscriptsDisabled = getattr(yta, "TranscriptsDisabled", _NeverMatch)
-    NoTranscriptFound = getattr(yta, "NoTranscriptFound", _NeverMatch)
-    RequestBlocked = getattr(yta, "RequestBlocked", _NeverMatch)
-    IpBlocked = getattr(yta, "IpBlocked", _NeverMatch)
-    AgeRestricted = getattr(yta, "AgeRestricted", _NeverMatch)
-    VideoUnplayable = getattr(yta, "VideoUnplayable", _NeverMatch)
-    PoTokenRequired = getattr(yta, "PoTokenRequired", _NeverMatch)
+    TranscriptsDisabled = _exception_type(yta, "TranscriptsDisabled")
+    NoTranscriptFound = _exception_type(yta, "NoTranscriptFound")
+    RequestBlocked = _exception_type(yta, "RequestBlocked")
+    IpBlocked = _exception_type(yta, "IpBlocked")
+    AgeRestricted = _exception_type(yta, "AgeRestricted")
+    VideoUnplayable = _exception_type(yta, "VideoUnplayable")
+    PoTokenRequired = _exception_type(yta, "PoTokenRequired")
 
-    api = _build_api(YouTubeTranscriptApi, opts)
+    api = _build_api(YouTubeTranscriptApi, opts_dict)
 
     try:
-        segments, meta = fetch_english_transcript(
-            api, video_id, preserve_formatting, NoTranscriptFound
-        )
+        segments, meta = fetch_english_transcript(api, video_id, preserve_formatting, NoTranscriptFound)
     except (TranscriptsDisabled, AgeRestricted) as exc:
-        raise RuntimeError(
-            "Transcripts are unavailable for this video (disabled or age-restricted)."
-        ) from exc
+        raise RuntimeError("Transcripts are unavailable for this video (disabled or age-restricted).") from exc
     except (RequestBlocked, IpBlocked) as exc:
-        raise RuntimeError(
-            "YouTube is blocking your IP. Use rotating residential proxies."
-        ) from exc
+        raise RuntimeError("YouTube is blocking your IP. Use rotating residential proxies.") from exc
     except (VideoUnplayable,) as exc:
         raise RuntimeError("The video is unplayable.") from exc
     except PoTokenRequired as exc:
-        raise RuntimeError(
-            "A PO token is required for this transcript (library limitation)."
-        ) from exc
+        raise RuntimeError("A PO token is required for this transcript (library limitation).") from exc
 
     if fmt == "txt":
         content = segments_to_txt(segments, with_timestamps=timestamps)
@@ -245,7 +363,9 @@ async def get_youtube_transcript(opts: dict) -> JSONDict:
         "video_id": video_id,
         "format": fmt,
         "content": content,
-        **meta,
+        "translated": meta["translated"],
+        "origin_lang": meta["origin_lang"],
+        "origin_type": meta["origin_type"],
     }
 
 

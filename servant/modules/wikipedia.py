@@ -1,19 +1,32 @@
 from __future__ import annotations
-from servant.defs import ToolDef, JSONDict
+
+from urllib.parse import quote
+
 import requests
+
+from servant.defs import GlobalContext, ToolDef
+from typed_json import JSON, JSONDict
 
 
 async def get_wiki_summary(topic: str, sentences: int = 2) -> JSONDict:
-    url = "https://en.wikipedia.org/api/rest_v1/page/summary/" + requests.utils.quote(
-        topic
-    )
-    data = requests.get(url, timeout=5).json()
-    return {"summary": " ".join(data["extract"].split(". ")[:sentences]) + "."}
+    url = "https://en.wikipedia.org/api/rest_v1/page/summary/" + quote(topic)
+    data: JSONDict = requests.get(url, timeout=5).json()
+    extract = str(data.get("extract") or "")
+    return {"summary": " ".join(extract.split(". ")[:sentences]).strip() + "."}
+
+
+async def _get_wiki_summary_tool(_ctx: GlobalContext, obj: JSON) -> JSONDict:
+    if not isinstance(obj, dict):
+        raise ValueError("Input must be an object.")
+    topic = obj.get("topic")
+    if not isinstance(topic, str) or not topic.strip():
+        raise ValueError("topic must be a non-empty string.")
+    return await get_wiki_summary(topic.strip())
 
 
 get_wiki_summary_tool = ToolDef(
     name="get_wiki_summary",
-    function=lambda _ctx, o: get_wiki_summary(o["topic"]),
+    function=_get_wiki_summary_tool,
     schema={
         "name": "get_wiki_summary",
         "description": "Return a short Wikipedia summary of a topic.",
