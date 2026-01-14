@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import List
+
 from servant.defs import (
     ToolDef,
     GlobalContext,
@@ -7,55 +7,80 @@ from servant.defs import (
     SECRET_IMGFLIP_PASSWORD,
     SECRET_IMGFLIP_USERNAME,
 )
-from servant.json import JSONDict
+from typed_json import JSON, JSONDict, coerce_str, obj_to_json
 import requests
 import json
 import time
 import Levenshtein
 
-all_memes = []
-all_memes_last_updated = None
+all_memes: JSON = {}
+all_memes_last_updated: float | None = None
+
+
+def _memes_from_data(data: JSON) -> list[JSONDict]:
+    if not isinstance(data, dict):
+        return []
+    payload = data.get("data")
+    if not isinstance(payload, dict):
+        return []
+    memes = payload.get("memes")
+    if not isinstance(memes, list):
+        return []
+    return [m for m in memes if isinstance(m, dict)]
+
+
+def _require_secret(ctx: GlobalContext, key: str) -> str:
+    return coerce_str(ctx.secrets.get(key), field=key, allow_empty=False)
+
+
+def _load_memes_from_file() -> None:
+    global all_memes
+    try:
+        with open("all_memes.json", "rt", encoding="utf-8") as handle:
+            loaded = json.load(handle)
+    except Exception:
+        return
+    if isinstance(loaded, dict):
+        all_memes = loaded
 
 
 async def update_meme_templates(ctx: GlobalContext) -> None:
     global all_memes_last_updated, all_memes
 
-    all_memes = requests.get(
+    response = requests.get(
         "https://api.imgflip.com/get_memes",
-        headers={"User-Agent": ctx.secrets[SECRET_USER_AGENT]},
+        headers={"User-Agent": _require_secret(ctx, SECRET_USER_AGENT)},
     ).json()
+    if not isinstance(response, dict):
+        all_memes = {}
+        return
+    all_memes = response
     # Save it to a file
-    with open("all_memes.json", "wt") as f:
-        json.dump(all_memes, f)
+    try:
+        with open("all_memes.json", "wt", encoding="utf-8") as f:
+            json.dump(all_memes, f)
+    except Exception:
+        pass
 
     all_memes_last_updated = time.time()
-    all_memes = all_memes
 
 
 async def list_meme_templates(ctx: GlobalContext) -> JSONDict:
     global all_memes, all_memes_last_updated
-    if not all_memes or (
-        all_memes_last_updated is None
-        or (
-            all_memes_last_updated
-            - requests.utils.parse_http_date(requests.utils.http_date())
-        )
-        > 3600
+    if not _memes_from_data(all_memes) or (
+        all_memes_last_updated is None or (time.time() - all_memes_last_updated) > 3600
     ):
         await update_meme_templates(ctx)
 
-    if not all_memes:
-        with open("all_memes.json", "rt") as f:
-            all_memes = json.load(f)
-    top_meme_names = [meme["name"] for meme in all_memes["data"]["memes"]]
-    top_meme_names = ", ".join(
-        f"'{meme['name']}' ({meme['box_count']} boxes)"
-        for meme in all_memes["data"]["memes"]
-    )
+    memes = _memes_from_data(all_memes)
+    if not memes:
+        _load_memes_from_file()
+        memes = _memes_from_data(all_memes)
+    top_meme_names = ", ".join(f"'{meme.get('name', '')}' ({meme.get('box_count', '')} boxes)" for meme in memes)
     return {
-        "message": f"Total memes: {len(all_memes['data']['memes'])}. Top memes: {top_meme_names}",
+        "message": f"Total memes: {len(memes)}. Top memes: {top_meme_names}",
         "data": {
-            "memes": all_memes["data"]["memes"],
+            "memes": obj_to_json(memes),
             "top_meme_names": top_meme_names,
         },
     }
@@ -76,30 +101,38 @@ list_meme_templates_tool: ToolDef = ToolDef(
 )
 
 
-async def generate_meme(ctx: GlobalContext, name: str, box_text: List[str]) -> JSONDict:
+async def generate_meme(ctx: GlobalContext, name: str, box_text: list[str]) -> JSONDict:
     meme_id = None
-    for meme in all_memes["data"]["memes"]:
-        if meme["name"].lower() == name.lower():
-            meme_id = meme["id"]
+    memes = _memes_from_data(all_memes)
+    if not memes:
+        await update_meme_templates(ctx)
+        memes = _memes_from_data(all_memes)
+    if not memes:
+        _load_memes_from_file()
+        memes = _memes_from_data(all_memes)
+    if not memes:
+        return {"error": "No meme templates available."}
+    for meme in memes:
+        meme_name = str(meme.get("name") or "")
+        if meme_name.lower() == name.lower():
+            raw_id = meme.get("id")
+            meme_id = str(raw_id) if raw_id is not None else None
             break
 
     if meme_id is None:
         # Find the closest few matches
         matches = []
 
-        for meme in all_memes["data"]["memes"]:
-            matches.append(
-                (meme["name"], Levenshtein.distance(name.lower(), meme["name"].lower()))
-            )
+        for meme in memes:
+            meme_name = str(meme.get("name") or "")
+            matches.append((meme_name, Levenshtein.distance(name.lower(), meme_name.lower())))
         matches.sort(key=lambda x: x[1])
-        return {
-            "error": f'Meme template "{name}" not found. Closest matches: {[x[0] for x in matches[:10]]}'
-        }
+        return {"error": f'Meme template "{name}" not found. Closest matches: {[x[0] for x in matches[:10]]}'}
 
     data = {
         "template_id": meme_id,
-        "username": ctx.secrets[SECRET_IMGFLIP_USERNAME],
-        "password": ctx.secrets[SECRET_IMGFLIP_PASSWORD],
+        "username": _require_secret(ctx, SECRET_IMGFLIP_USERNAME),
+        "password": _require_secret(ctx, SECRET_IMGFLIP_PASSWORD),
     }
 
     if len(box_text) > 0:
@@ -114,17 +147,31 @@ async def generate_meme(ctx: GlobalContext, name: str, box_text: List[str]) -> J
     for i, text in enumerate(box_text):
         data[f"boxes[{i}][text]"] = text
 
-    headers = {"User-Agent": ctx.secrets[SECRET_USER_AGENT]}
+    headers = {"User-Agent": _require_secret(ctx, SECRET_USER_AGENT)}
 
     print(data)
 
-    r = requests.post(
-        "https://api.imgflip.com/caption_image", data=data, headers=headers
-    )
+    r = requests.post("https://api.imgflip.com/caption_image", data=data, headers=headers)
 
     rj = r.json()
     print(rj)
     return {"image": rj["data"]["url"]}
+
+
+async def _generate_meme_tool(ctx: GlobalContext, obj: JSON) -> JSONDict:
+    if not isinstance(obj, dict):
+        raise ValueError("Input must be an object.")
+    template_name = obj.get("template_name")
+    box_text = obj.get("box_text", [])
+    if not isinstance(template_name, str) or not template_name.strip():
+        raise ValueError("template_name must be a non-empty string.")
+    if not isinstance(box_text, list):
+        raise ValueError("box_text must be a list of strings.")
+    return await generate_meme(
+        ctx,
+        template_name.strip(),
+        [str(item) for item in box_text],
+    )
 
 
 generate_meme_tool: ToolDef = ToolDef(
@@ -148,5 +195,5 @@ generate_meme_tool: ToolDef = ToolDef(
             "required": ["template_id", "text0", "text1"],
         },
     },
-    function=lambda ctx, obj: generate_meme(ctx, obj["template_name"], obj["box_text"]),
+    function=_generate_meme_tool,
 )

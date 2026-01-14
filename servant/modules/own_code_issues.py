@@ -1,16 +1,15 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any, Dict, List, Optional
 
-from servant.json import JSONDict
-from servant.defs import ToolDef
+from typed_json import JSON, JSONDict, coerce_str, obj_to_json, require_obj
+from servant.defs import GlobalContext, ToolDef, SECRET_GITHUB_TOKEN
 
 from github import Github
 from github.GithubException import GithubException
-
-from servant.defs import SECRET_GITHUB_TOKEN  # type: ignore
-
+from github.Issue import Issue
+from github.Label import Label
+from github.Repository import Repository
 
 _REPO_FULL_NAME = "wabbit-corp/python-jeeves"
 
@@ -32,14 +31,11 @@ def _build_body(kind: str, description: str) -> str:
         description = "_No description provided._"
 
     # Keep it simple and template-ish without turning it into bureaucracy.
-    return (
-        f"## {kind}\n\n"
-        f"{description}\n"
-    )
+    return f"## {kind}\n\n" f"{description}\n"
 
 
-def _try_get_labels(repo, label_names: List[str]):
-    labels = []
+def _try_get_labels(repo: Repository, label_names: list[str]) -> list[Label]:
+    labels: list[Label] = []
     for ln in label_names:
         try:
             labels.append(repo.get_label(ln))
@@ -49,18 +45,18 @@ def _try_get_labels(repo, label_names: List[str]):
     return labels
 
 
-def _create_issue_sync(token: str, title: str, body: str, label_names: List[str]) -> JSONDict:
+def _create_issue_sync(token: str, title: str, body: str, label_names: list[str]) -> JSONDict:
     gh = Github(token)
-    repo = gh.get_repo(_REPO_FULL_NAME)
+    repo: Repository = gh.get_repo(_REPO_FULL_NAME)
 
     labels = _try_get_labels(repo, label_names)
 
     try:
         if labels:
-            issue = repo.create_issue(title='[Vox] ' + title, body=body, labels=labels)
+            issue: Issue = repo.create_issue(title="[Vox] " + title, body=body, labels=labels)
             used = [l.name for l in labels]
         else:
-            issue = repo.create_issue(title='[Vox] ' + title, body=body)
+            issue = repo.create_issue(title="[Vox] " + title, body=body)
             used = []
     except GithubException as e:
         msg = (getattr(e, "data", {}) or {}).get("message") or str(e)
@@ -72,12 +68,12 @@ def _create_issue_sync(token: str, title: str, body: str, label_names: List[str]
         "issue_number": issue.number,
         "issue_url": issue.html_url,
         "title": issue.title,
-        "labels_applied": used,
+        "labels_applied": obj_to_json(used),
     }
 
 
-async def file_bug_report(name: str, description: str = "", *, ctx: Any) -> JSONDict:
-    token = ctx.secrets[SECRET_GITHUB_TOKEN].strip()
+async def file_bug_report(name: str, description: str = "", *, ctx: GlobalContext) -> JSONDict:
+    token = coerce_str(ctx.secrets.get(SECRET_GITHUB_TOKEN), field="github.token", allow_empty=False)
     title = _normalize_title("Bug", name)
     body = _build_body("Bug Report", description)
 
@@ -85,8 +81,8 @@ async def file_bug_report(name: str, description: str = "", *, ctx: Any) -> JSON
     return await asyncio.to_thread(_create_issue_sync, token, title, body, ["bug"])
 
 
-async def file_feature_request(name: str, description: str = "", *, ctx: Any) -> JSONDict:
-    token = ctx.secrets[SECRET_GITHUB_TOKEN].strip()
+async def file_feature_request(name: str, description: str = "", *, ctx: GlobalContext) -> JSONDict:
+    token = coerce_str(ctx.secrets.get(SECRET_GITHUB_TOKEN), field="github.token", allow_empty=False)
     title = _normalize_title("Feature", name)
     body = _build_body("Feature Request", description)
 
@@ -94,13 +90,43 @@ async def file_feature_request(name: str, description: str = "", *, ctx: Any) ->
     return await asyncio.to_thread(_create_issue_sync, token, title, body, ["enhancement", "feature"])
 
 
+async def _file_bug_report_tool(ctx: GlobalContext, obj: JSON) -> JSONDict:
+    data = require_obj(obj)
+    name = coerce_str(
+        data.get("name"),
+        field="name",
+        allow_empty=False,
+        allow_non_str=False,
+    )
+    description = coerce_str(
+        data.get("description"),
+        field="description",
+        default="",
+        allow_non_str=False,
+    )
+    return await file_bug_report(name=name, description=description, ctx=ctx)
+
+
+async def _file_feature_request_tool(ctx: GlobalContext, obj: JSON) -> JSONDict:
+    data = require_obj(obj)
+    name = coerce_str(
+        data.get("name"),
+        field="name",
+        allow_empty=False,
+        allow_non_str=False,
+    )
+    description = coerce_str(
+        data.get("description"),
+        field="description",
+        default="",
+        allow_non_str=False,
+    )
+    return await file_feature_request(name=name, description=description, ctx=ctx)
+
+
 file_bug_report_schema: ToolDef = ToolDef(
     name="file_bug_report",
-    function=lambda ctx, obj: file_bug_report(
-        name=obj["name"],
-        description=obj.get("description", ""),
-        ctx=ctx,
-    ),
+    function=_file_bug_report_tool,
     schema={
         "name": "file_bug_report",
         "description": "Create a GitHub issue (bug report) in wabbit-corp/python-jeeves.",
@@ -117,11 +143,7 @@ file_bug_report_schema: ToolDef = ToolDef(
 
 file_feature_request_schema: ToolDef = ToolDef(
     name="file_feature_request",
-    function=lambda ctx, obj: file_feature_request(
-        name=obj["name"],
-        description=obj.get("description", ""),
-        ctx=ctx,
-    ),
+    function=_file_feature_request_tool,
     schema={
         "name": "file_feature_request",
         "description": "Create a GitHub issue (feature request) in wabbit-corp/python-jeeves.",
@@ -129,7 +151,10 @@ file_feature_request_schema: ToolDef = ToolDef(
             "type": "object",
             "properties": {
                 "name": {"type": "string", "description": "Short feature title."},
-                "description": {"type": "string", "description": "Feature details and rationale."},
+                "description": {
+                    "type": "string",
+                    "description": "Feature details and rationale.",
+                },
             },
             "required": ["name"],
         },

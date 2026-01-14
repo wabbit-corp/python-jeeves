@@ -8,34 +8,33 @@ import sqlite3
 import tempfile
 import zipfile
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
 
 import discord
 
 from servant.defs import GlobalContext, ToolDef
-from servant.json import JSON, JSONDict
+from typed_json import JSON, JSONDict, obj_to_json
 from servant.modules import commitment, topic_subscriptions
 
 _LOGGER = logging.getLogger(__name__)
 
-MODULE_PROMPT = (
-    "DB export module: export topic subscriptions and commitments data to CSV and zip."
-)
+MODULE_PROMPT = "DB export module: export topic subscriptions and commitments data to CSV and zip."
 
 
 def _quote_ident(name: str) -> str:
     return '"' + name.replace('"', '""') + '"'
 
 
-def _format_csv_value(value: Any) -> Any:
+def _format_csv_value(value: object) -> str | int | float:
     if value is None:
         return ""
     if isinstance(value, bytes):
         return "hex:" + value.hex()
-    return value
+    if isinstance(value, (str, int, float)):
+        return value
+    return str(value)
 
 
-def _list_tables(conn: sqlite3.Connection) -> List[str]:
+def _list_tables(conn: sqlite3.Connection) -> list[str]:
     rows = conn.execute(
         """
         SELECT name
@@ -47,9 +46,7 @@ def _list_tables(conn: sqlite3.Connection) -> List[str]:
     return [str(row["name"]) for row in rows]
 
 
-def _export_db_to_csv(
-    db_path: Path, out_dir: Path, *, prefix: str
-) -> Tuple[List[Dict[str, Any]], List[Path]]:
+def _export_db_to_csv(db_path: Path, out_dir: Path, *, prefix: str) -> tuple[list[JSONDict], list[Path]]:
     if not db_path.exists():
         raise FileNotFoundError(f"Database not found: {db_path}")
 
@@ -58,15 +55,12 @@ def _export_db_to_csv(
     conn.execute("PRAGMA busy_timeout=5000;")
     conn.execute("PRAGMA query_only=1;")
 
-    exports: List[Dict[str, Any]] = []
-    csv_paths: List[Path] = []
+    exports: list[JSONDict] = []
+    csv_paths: list[Path] = []
     try:
         tables = _list_tables(conn)
         for table in tables:
-            columns = [
-                str(row["name"])
-                for row in conn.execute(f"PRAGMA table_info({_quote_ident(table)})")
-            ]
+            columns = [str(row["name"]) for row in conn.execute(f"PRAGMA table_info({_quote_ident(table)})")]
             csv_path = out_dir / f"{prefix}_{table}.csv"
             row_count = 0
 
@@ -82,9 +76,7 @@ def _export_db_to_csv(
                     for row in batch:
                         row_count += 1
                         if columns:
-                            writer.writerow(
-                                [_format_csv_value(row[col]) for col in columns]
-                            )
+                            writer.writerow([_format_csv_value(row[col]) for col in columns])
                         else:
                             writer.writerow([_format_csv_value(value) for value in row])
 
@@ -109,9 +101,9 @@ def _build_zip(
     *,
     subscriptions_db: Path,
     commitments_db: Path,
-) -> Tuple[Path, List[Dict[str, Any]]]:
-    exports: List[Dict[str, Any]] = []
-    csv_paths: List[Path] = []
+) -> tuple[Path, list[JSONDict]]:
+    exports: list[JSONDict] = []
+    csv_paths: list[Path] = []
 
     subscription_exports, subscription_paths = _export_db_to_csv(
         subscriptions_db, out_dir, prefix="topic_subscriptions"
@@ -119,9 +111,7 @@ def _build_zip(
     exports.extend(subscription_exports)
     csv_paths.extend(subscription_paths)
 
-    commitment_exports, commitment_paths = _export_db_to_csv(
-        commitments_db, out_dir, prefix="commitments"
-    )
+    commitment_exports, commitment_paths = _export_db_to_csv(commitments_db, out_dir, prefix="commitments")
     exports.extend(commitment_exports)
     csv_paths.extend(commitment_paths)
 
@@ -169,9 +159,7 @@ async def _send_file(
         fut.result()
 
 
-async def export_subscriptions_commitments_zip(
-    ctx: GlobalContext, obj: JSON
-) -> JSONDict:
+async def export_subscriptions_commitments_zip(ctx: GlobalContext, obj: JSON) -> JSONDict:
     if not isinstance(obj, dict):
         raise ValueError("Input must be an object.")
 
@@ -201,7 +189,7 @@ async def export_subscriptions_commitments_zip(
     return {
         "ok": True,
         "zip_filename": zip_name,
-        "tables": exports,
+        "tables": obj_to_json(exports),
         "channel_id": channel_id,
     }
 

@@ -5,9 +5,16 @@ from __future__ import annotations
 import os
 import re
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
 
-from servant.json import JSONDict
+from typed_json import (
+    JSON,
+    JSONDict,
+    coerce_bool,
+    coerce_int,
+    coerce_str,
+    obj_to_json,
+    require_obj,
+)
 from servant.defs import ToolDef
 
 _MAX_READ_LINES = 250
@@ -34,7 +41,7 @@ def _is_within_root(root: Path, target: Path) -> bool:
     return target == root or root in target.parents
 
 
-def _resolve_under_root(root: Path, rel_path: str) -> Path:
+def _resolve_under_root(root: Path, rel_path: str | None) -> Path:
     if rel_path is None:
         rel_path = "."
     rel_path = rel_path.strip()
@@ -57,7 +64,7 @@ def _ensure_py_file(path: Path) -> None:
         raise ValueError("Only .py files are allowed.")
 
 
-def _safe_read_lines(path: Path, start_line: int, end_line: int) -> Tuple[int, List[Dict[str, Any]]]:
+def _safe_read_lines(path: Path, start_line: int, end_line: int) -> tuple[int, list[JSONDict]]:
     _ensure_py_file(path)
 
     if start_line < 1:
@@ -67,7 +74,7 @@ def _safe_read_lines(path: Path, start_line: int, end_line: int) -> Tuple[int, L
     if (end_line - start_line + 1) > _MAX_READ_LINES:
         raise ValueError(f"Requested too many lines (max {_MAX_READ_LINES}).")
 
-    out: List[Dict[str, Any]] = []
+    out: list[JSONDict] = []
     total = 0
 
     with path.open("r", encoding="utf-8", errors="replace") as f:
@@ -92,7 +99,7 @@ def _safe_read_lines(path: Path, start_line: int, end_line: int) -> Tuple[int, L
     return total, out
 
 
-def _ls_dir(path: Path, recursive: bool, max_entries: int) -> List[Dict[str, Any]]:
+def _ls_dir(path: Path, recursive: bool, max_entries: int) -> list[JSONDict]:
     if not path.exists():
         raise ValueError("Path does not exist.")
     if not path.is_dir():
@@ -100,7 +107,7 @@ def _ls_dir(path: Path, recursive: bool, max_entries: int) -> List[Dict[str, Any
 
     max_entries = max(1, min(int(max_entries), 5000))
 
-    def stat_entry(p: Path) -> Dict[str, Any]:
+    def stat_entry(p: Path) -> JSONDict:
         try:
             st = p.stat()
             return {
@@ -111,9 +118,14 @@ def _ls_dir(path: Path, recursive: bool, max_entries: int) -> List[Dict[str, Any
                 "mtime_epoch": int(st.st_mtime),
             }
         except OSError:
-            return {"path": str(p), "name": p.name, "is_dir": p.is_dir(), "error": "stat_failed"}
+            return {
+                "path": str(p),
+                "name": p.name,
+                "is_dir": p.is_dir(),
+                "error": "stat_failed",
+            }
 
-    out: List[Dict[str, Any]] = []
+    out: list[JSONDict] = []
 
     if not recursive:
         for child in sorted(path.iterdir(), key=lambda x: (not x.is_dir(), x.name.lower())):
@@ -140,7 +152,7 @@ def _ls_dir(path: Path, recursive: bool, max_entries: int) -> List[Dict[str, Any
     return out
 
 
-def _iter_py_files(base: Path, max_files: int) -> List[Path]:
+def _iter_py_files(base: Path, max_files: int) -> list[Path]:
     max_files = max(1, min(int(max_files), 10000))
 
     if base.is_file():
@@ -153,7 +165,7 @@ def _iter_py_files(base: Path, max_files: int) -> List[Path]:
         raise ValueError("Path must be a directory or a .py file.")
 
     skip_dirs = {".git", "__pycache__", ".venv", "venv", "dist", "build", ".mypy_cache"}
-    files: List[Path] = []
+    files: list[Path] = []
 
     for root, dirs, filenames in os.walk(base):
         dirs[:] = [d for d in dirs if d not in skip_dirs]
@@ -168,14 +180,14 @@ def _iter_py_files(base: Path, max_files: int) -> List[Path]:
 
 
 def _grep_in_files(
-    files: List[Path],
+    files: list[Path],
     pattern: str,
     *,
     regex: bool,
     ignore_case: bool,
     whole_word: bool,
     max_matches: int,
-) -> List[Dict[str, Any]]:
+) -> list[JSONDict]:
     if not pattern:
         raise ValueError("pattern must be non-empty.")
 
@@ -194,7 +206,7 @@ def _grep_in_files(
     except re.error as e:
         raise ValueError(f"Invalid regex: {e}") from e
 
-    matches: List[Dict[str, Any]] = []
+    matches: list[JSONDict] = []
     for fp in files:
         if fp.suffix != ".py":
             continue
@@ -219,11 +231,18 @@ def _grep_in_files(
 # Tool entrypoints
 # -----------------------
 
+
 async def own_code_ls(path: str = ".", recursive: bool = False, max_entries: int = _DEFAULT_LS_MAX_ENTRIES) -> JSONDict:
     root = _repo_root()
     p = _resolve_under_root(root, path)
     items = _ls_dir(p, recursive=bool(recursive), max_entries=int(max_entries))
-    return {"ok": True, "root": str(root), "path": str(p), "recursive": bool(recursive), "items": items}
+    return {
+        "ok": True,
+        "root": str(root),
+        "path": str(p),
+        "recursive": bool(recursive),
+        "items": obj_to_json(items),
+    }
 
 
 async def own_code_read(path: str, start_line: int = 1, end_line: int = 250) -> JSONDict:
@@ -242,7 +261,7 @@ async def own_code_read(path: str, start_line: int = 1, end_line: int = 250) -> 
         "start_line": start_line,
         "end_line": end_line,
         "total_lines": total,
-        "lines": lines,
+        "lines": obj_to_json(lines),
     }
 
 
@@ -279,7 +298,7 @@ async def own_code_grep(
         "ignore_case": bool(ignore_case),
         "whole_word": bool(whole_word),
         "files_scanned": len(files),
-        "matches": matches,
+        "matches": obj_to_json(matches),
         "truncated": truncated,
     }
 
@@ -290,10 +309,10 @@ async def own_code_grep(
 
 own_code_ls_schema: ToolDef = ToolDef(
     name="own_code_ls",
-    function=lambda ctx, obj: own_code_ls(
-        path=obj.get("path", "."),
-        recursive=obj.get("recursive", False),
-        max_entries=obj.get("max_entries", _DEFAULT_LS_MAX_ENTRIES),
+    function=lambda _ctx, obj: own_code_ls(
+        path=coerce_str(require_obj(obj).get("path"), default="."),
+        recursive=coerce_bool(require_obj(obj).get("recursive"), False),
+        max_entries=coerce_int(require_obj(obj).get("max_entries"), _DEFAULT_LS_MAX_ENTRIES),
     ),
     schema={
         "name": "own_code_ls",
@@ -301,9 +320,21 @@ own_code_ls_schema: ToolDef = ToolDef(
         "parameters": {
             "type": "object",
             "properties": {
-                "path": {"type": "string", "description": "Relative path under ROOT (no absolute paths).", "default": "."},
-                "recursive": {"type": "boolean", "description": "Recurse into subdirectories.", "default": False},
-                "max_entries": {"type": "integer", "description": "Cap the number of returned entries (1..5000).", "default": _DEFAULT_LS_MAX_ENTRIES},
+                "path": {
+                    "type": "string",
+                    "description": "Relative path under ROOT (no absolute paths).",
+                    "default": ".",
+                },
+                "recursive": {
+                    "type": "boolean",
+                    "description": "Recurse into subdirectories.",
+                    "default": False,
+                },
+                "max_entries": {
+                    "type": "integer",
+                    "description": "Cap the number of returned entries (1..5000).",
+                    "default": _DEFAULT_LS_MAX_ENTRIES,
+                },
             },
         },
     },
@@ -311,10 +342,10 @@ own_code_ls_schema: ToolDef = ToolDef(
 
 own_code_read_schema: ToolDef = ToolDef(
     name="own_code_read",
-    function=lambda ctx, obj: own_code_read(
-        path=obj["path"],
-        start_line=obj.get("start_line", 1),
-        end_line=obj.get("end_line", 250),
+    function=lambda _ctx, obj: own_code_read(
+        path=coerce_str(require_obj(obj).get("path")),
+        start_line=coerce_int(require_obj(obj).get("start_line"), 1),
+        end_line=coerce_int(require_obj(obj).get("end_line"), 250),
     ),
     schema={
         "name": "own_code_read",
@@ -322,9 +353,20 @@ own_code_read_schema: ToolDef = ToolDef(
         "parameters": {
             "type": "object",
             "properties": {
-                "path": {"type": "string", "description": "Relative path to a .py file under ROOT."},
-                "start_line": {"type": "integer", "description": "1-indexed start line (inclusive).", "default": 1},
-                "end_line": {"type": "integer", "description": "1-indexed end line (inclusive). Must be within 250 lines of start_line.", "default": 250},
+                "path": {
+                    "type": "string",
+                    "description": "Relative path to a .py file under ROOT.",
+                },
+                "start_line": {
+                    "type": "integer",
+                    "description": "1-indexed start line (inclusive).",
+                    "default": 1,
+                },
+                "end_line": {
+                    "type": "integer",
+                    "description": "1-indexed end line (inclusive). Must be within 250 lines of start_line.",
+                    "default": 250,
+                },
             },
             "required": ["path"],
         },
@@ -333,14 +375,14 @@ own_code_read_schema: ToolDef = ToolDef(
 
 own_code_grep_schema: ToolDef = ToolDef(
     name="own_code_grep",
-    function=lambda ctx, obj: own_code_grep(
-        pattern=obj["pattern"],
-        path=obj.get("path", "."),
-        regex=obj.get("regex", False),
-        ignore_case=obj.get("ignore_case", False),
-        whole_word=obj.get("whole_word", False),
-        max_matches=obj.get("max_matches", _DEFAULT_GREP_MAX_MATCHES),
-        max_files=obj.get("max_files", _DEFAULT_GREP_MAX_FILES),
+    function=lambda _ctx, obj: own_code_grep(
+        pattern=coerce_str(require_obj(obj).get("pattern")),
+        path=coerce_str(require_obj(obj).get("path"), default="."),
+        regex=coerce_bool(require_obj(obj).get("regex"), False),
+        ignore_case=coerce_bool(require_obj(obj).get("ignore_case"), False),
+        whole_word=coerce_bool(require_obj(obj).get("whole_word"), False),
+        max_matches=coerce_int(require_obj(obj).get("max_matches"), _DEFAULT_GREP_MAX_MATCHES),
+        max_files=coerce_int(require_obj(obj).get("max_files"), _DEFAULT_GREP_MAX_FILES),
     ),
     schema={
         "name": "own_code_grep",
@@ -348,13 +390,40 @@ own_code_grep_schema: ToolDef = ToolDef(
         "parameters": {
             "type": "object",
             "properties": {
-                "pattern": {"type": "string", "description": "Pattern to search for (literal unless regex=true)."},
-                "path": {"type": "string", "description": "Relative path under ROOT to search (dir or .py file).", "default": "."},
-                "regex": {"type": "boolean", "description": "Treat pattern as regex.", "default": False},
-                "ignore_case": {"type": "boolean", "description": "Case-insensitive search.", "default": False},
-                "whole_word": {"type": "boolean", "description": "Match whole words only.", "default": False},
-                "max_matches": {"type": "integer", "description": "Cap returned matches (1..5000).", "default": _DEFAULT_GREP_MAX_MATCHES},
-                "max_files": {"type": "integer", "description": "Cap scanned .py files (1..10000).", "default": _DEFAULT_GREP_MAX_FILES},
+                "pattern": {
+                    "type": "string",
+                    "description": "Pattern to search for (literal unless regex=true).",
+                },
+                "path": {
+                    "type": "string",
+                    "description": "Relative path under ROOT to search (dir or .py file).",
+                    "default": ".",
+                },
+                "regex": {
+                    "type": "boolean",
+                    "description": "Treat pattern as regex.",
+                    "default": False,
+                },
+                "ignore_case": {
+                    "type": "boolean",
+                    "description": "Case-insensitive search.",
+                    "default": False,
+                },
+                "whole_word": {
+                    "type": "boolean",
+                    "description": "Match whole words only.",
+                    "default": False,
+                },
+                "max_matches": {
+                    "type": "integer",
+                    "description": "Cap returned matches (1..5000).",
+                    "default": _DEFAULT_GREP_MAX_MATCHES,
+                },
+                "max_files": {
+                    "type": "integer",
+                    "description": "Cap scanned .py files (1..10000).",
+                    "default": _DEFAULT_GREP_MAX_FILES,
+                },
             },
             "required": ["pattern"],
         },

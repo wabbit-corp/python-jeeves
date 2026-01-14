@@ -1,5 +1,5 @@
 from servant.defs import GlobalContext, ToolDef
-from servant.json import JSONDict
+from typed_json import JSON, JSONDict
 
 # MODULE_PROMPT = f"""
 # ## Image Generation
@@ -15,6 +15,9 @@ from servant.json import JSONDict
 async def generate_image(ctx: GlobalContext, prompt: str) -> JSONDict:
     import openai
 
+    if ctx.openai_client is None:
+        raise RuntimeError("OpenAI client not initialized.")
+
     try:
         r = await ctx.openai_client.images.generate(
             prompt=prompt,
@@ -26,7 +29,19 @@ async def generate_image(ctx: GlobalContext, prompt: str) -> JSONDict:
     except openai.APIError as e:
         return {"error": str(e)}
     print(r.json)
-    return {"image": r.data[0].url, "revised_prompt": r.data[0].revised_prompt}
+    if not r.data:
+        return {"error": "No image data returned."}
+    image = r.data[0]
+    return {"image": image.url, "revised_prompt": image.revised_prompt}
+
+
+async def _generate_image_tool(ctx: GlobalContext, obj: JSON) -> JSONDict:
+    if not isinstance(obj, dict):
+        raise ValueError("Input must be an object.")
+    prompt = obj.get("prompt")
+    if not isinstance(prompt, str) or not prompt.strip():
+        raise ValueError("prompt must be a non-empty string.")
+    return await generate_image(ctx, prompt.strip())
 
 
 generate_image_tool: ToolDef = ToolDef(
@@ -45,5 +60,5 @@ generate_image_tool: ToolDef = ToolDef(
             "required": ["prompt"],
         },
     },
-    function=lambda ctx, obj: generate_image(ctx, obj["prompt"]),
+    function=_generate_image_tool,
 )
