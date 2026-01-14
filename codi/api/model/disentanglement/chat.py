@@ -1,8 +1,10 @@
-import math
-import datetime
+from __future__ import annotations
 
-from .feature import Feature
+import datetime
+import math
+
 from ..input.message import Message
+from .feature import Feature
 
 
 class Chat(Feature):
@@ -10,11 +12,11 @@ class Chat(Feature):
     This class represents a feature that is chat-specific.
     """
 
-    def __str__(self):
+    def __str__(self) -> str:
         return "Chat"
 
     @staticmethod
-    def get_group_features():
+    def get_group_features() -> list[type[Feature]]:
         """
         Return the chat-related features
 
@@ -29,7 +31,7 @@ class Time(Chat):
     """
 
     @classmethod
-    def extract(cls, message1: Message, message2: Message, bin_size: int = 50):
+    def extract(cls, message1: Message, message2: Message, bin_size: int = 50) -> Time:
         """
         This method extracts the time between message1 and message2 in seconds, which is then binned logarithmically.
 
@@ -69,7 +71,7 @@ class Speaker(Chat):
     """
 
     @classmethod
-    def extract(cls, message1: Message, message2: Message):
+    def extract(cls, message1: Message, message2: Message) -> Speaker:
         """
         This method checks if the speaker of message1 is the same as the speaker of message2.
 
@@ -88,7 +90,7 @@ class Speaker(Chat):
 
 class HasMention(Chat):
     @classmethod
-    def extract(cls, message1: Message, message2: Message):
+    def extract(cls, message1: Message, message2: Message) -> HasMention:
         """
         This method checks if message1 has mentions or message2 has mentions.
 
@@ -118,7 +120,7 @@ class CrossAuthorMention(Chat):
     """
 
     @classmethod
-    def extract(cls, message1: Message, message2: Message):
+    def extract(cls, message1: Message, message2: Message) -> CrossAuthorMention:
         """
         This method checks cross message author mentioning features.
         message1 mentions message2 author
@@ -153,7 +155,7 @@ class MentionSame(Chat):
     """
 
     @classmethod
-    def extract(cls, message1: Message, message2: Message):
+    def extract(cls, message1: Message, message2: Message) -> MentionSame:
         """
         This method checks if both in message1 and mention2 the same name is mentioned
 
@@ -179,7 +181,7 @@ class MentionOther(Chat):
     """
 
     @classmethod
-    def extract(cls, message1: Message, message2: Message):
+    def extract(cls, message1: Message, message2: Message) -> MentionOther:
         """
         This method checks if message1 and message2 mention the same third member (not author1 nor author2).
 

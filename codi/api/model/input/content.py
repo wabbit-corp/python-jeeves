@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import builtins
 import re
-import emoji
-
 from typing import TYPE_CHECKING
+
+import emoji
 
 if TYPE_CHECKING:
     from .message import Message
@@ -15,15 +15,15 @@ class Content:
     This class represents the content of a message
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._start_position: int | None = None
         self._end_position: int | None = None
         self._message: Message | None = None
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return self.__str__()
 
-    def __str__(self, content=None):
+    def __str__(self, content: str | None = None) -> str:
         return f"{self.__class__}: {content}"
 
     def _get_start_position(self) -> int:
@@ -95,12 +95,12 @@ class Text(Content):
     This class represents a textual content in a message.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self._text: str | None = None
 
-    def __str__(self, content=None):
-        return super.__str__(self._text)
+    def __str__(self, content: str | None = None) -> str:
+        return super().__str__(self._text)
 
     def _get_text(self) -> str:
         """
@@ -155,7 +155,7 @@ class Text(Content):
         :param contents: The list of the retrieved contents
         :return: A list of text blocks
         """
-        text = []
+        text: list[Text] = []
 
         if len(contents) == 0 and message != "":
             text.append(Text().deserialize(0, len(message), message_obj, message))
@@ -191,12 +191,12 @@ class Link(Content):
     This class represents a link in a message.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self._url: str | None = None
 
-    def __str__(self, content=None):
-        return super.__str__(self._url)
+    def __str__(self, content: str | None = None) -> str:
+        return super().__str__(self._url)
 
     def _get_url(self) -> str:
         """
@@ -249,7 +249,7 @@ class Link(Content):
         :param message_obj: The message object
         :return: The list of links
         """
-        links = []
+        links: list[Link] = []
         link_regex = re.compile(
             r"<?(https?://)(www\.)?([-a-zA-Z0-9@:%._+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b)(["
             r"-a-zA-Z0-9()@:%_+.~#?&/=]*)>?"
@@ -260,7 +260,7 @@ class Link(Content):
             links.append(Link().deserialize(link.start(), link.end(), message_obj, link_text))
 
             pattern = f"<{link_text}>" if (f"<{link_text}>" in message) else f"{link_text}"
-            message = message.replace(pattern, f"__LINK__", 1)
+            message = message.replace(pattern, "__LINK__", 1)
 
         return links, message
 
@@ -270,12 +270,12 @@ class Code(Content):
     This class represents a code block in a message.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self._code: str | None = None
 
-    def __str__(self, content=None):
-        return super.__str__(self._code)
+    def __str__(self, content: str | None = None) -> str:
+        return super().__str__(self._code)
 
     def _get_code(self) -> str:
         """
@@ -328,13 +328,13 @@ class Code(Content):
         :param message_obj: The message object
         :return: The list of code blocks in the message
         """
-        code_block_list = []
+        code_block_list: list[Code] = []
         code_regex = re.compile(r"(`{3}[\s\S]*?`{3})|(`[\s\S]*?`)")
 
         for code in code_regex.finditer(message):
             code_text = "".join([i for i in code.groups() if i])
             code_block_list.append(Code().deserialize(code.start(), code.end(), message_obj, code_text))
-            message = message.replace(code_text, f"__CODEBLOCK__", 1)
+            message = message.replace(code_text, "__CODEBLOCK__", 1)
 
         return code_block_list, message
 
@@ -344,12 +344,12 @@ class Multimedia(Content):
     This class represents a multimedia element in a message.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self._url: str | None = None
 
-    def __str__(self, content=None):
-        return super.__str__(self._url)
+    def __str__(self, content: str | None = None) -> str:
+        return super().__str__(self._url)
 
     def _get_url(self) -> str:
         """
@@ -402,7 +402,7 @@ class Multimedia(Content):
         :param message_obj: The message object
         :return: The list of multimedia elements in the message
         """
-        multimedia_list = []
+        multimedia_list: list[Multimedia] = []
         video_regex = re.compile(
             r"<?(https?://)(player.|www.)?(vimeo\.com|youtu("
             r"?:be\.com|\.be|be\.googleapis\.com))(/)(video/|embed/|watch\?v=|v/)?(["
@@ -414,7 +414,7 @@ class Multimedia(Content):
             multimedia_list.append(Multimedia().deserialize(video.start(), video.end(), message_obj, video_url))
 
             pattern = f"<{video_url}>" if (f"<{video_url}>" in message) else f"{video_url}"
-            message = message.replace(pattern, f"__VIDEO__", 1)
+            message = message.replace(pattern, "__VIDEO__", 1)
 
         multimedia_regex = re.compile(
             r"<?(https?://)([-a-zA-Z0-9()@:%_+.~#?&/=]*)(\.)("
@@ -428,7 +428,7 @@ class Multimedia(Content):
             )
 
             pattern = f"<{multimedia_url}>" if (f"<{multimedia_url}>" in message) else f"{multimedia_url}"
-            message = message.replace(pattern, f"__MULTIMEDIA__", 1)
+            message = message.replace(pattern, "__MULTIMEDIA__", 1)
 
         return multimedia_list, message
 
@@ -438,12 +438,12 @@ class Emoji(Content):
     This class represents an emoji in a message.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self._unicode: str | None = None
 
-    def __str__(self, content=None):
-        return super.__str__(self._unicode)
+    def __str__(self, content: str | None = None) -> str:
+        return super().__str__(self._unicode)
 
     def _get_unicode(self) -> str:
         """
@@ -496,19 +496,19 @@ class Emoji(Content):
         :param message_obj: The message object
         :return: The list of Emoji objects in the message
         """
-        emoji_list = []
+        emoji_list: list[Emoji] = []
         emoji_regex = emoji.get_emoji_regexp()
 
         for emoji_char in emoji_regex.finditer(message):
             emoji_unicode = "".join([i for i in emoji_char.groups() if i])
             emoji_list.append(Emoji().deserialize(emoji_char.start(), emoji_char.end(), message_obj, emoji_unicode))
 
-            message = message.replace(emoji_unicode, f"__EMOJI__", 1)
+            message = message.replace(emoji_unicode, "__EMOJI__", 1)
 
         for emoji_char in re.finditer(r":([^\s:]+):", message):
             emoji_unicode = emoji_char.group(0)
             emoji_list.append(Emoji().deserialize(emoji_char.start(), emoji_char.end(), message_obj, emoji_unicode))
 
-            message = message.replace(emoji_char.group(0), f"__EMOJI__", 1)
+            message = message.replace(emoji_char.group(0), "__EMOJI__", 1)
 
         return emoji_list, message

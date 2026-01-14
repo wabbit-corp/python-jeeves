@@ -2,23 +2,51 @@ import json
 import os
 import re
 import uuid
-from typing import Any, Sequence
+from collections.abc import Sequence
+from typing import TypedDict
 
 
-def convert_annot(names_list: Sequence[str], filename: str) -> dict[str, Any]:
+class AnnotMember(TypedDict):
+    id: str
+    name: str
+
+
+class AnnotMessage(TypedDict):
+    id: str
+    authorId: str
+    content: str
+    conversation: str
+    timestamp: str
+
+
+class AnnotChannel(TypedDict):
+    id: str
+    name: str
+    path: str
+    messages: list[AnnotMessage]
+
+
+class AnnotOutput(TypedDict):
+    id: str
+    name: str
+    members: list[AnnotMember]
+    channels: list[AnnotChannel]
+
+
+def convert_annot(names_list: Sequence[str], filename: str) -> AnnotOutput:
     """
     Convert a .annot file to a .json file for training.
 
     :param names_list: The names of the files to convert
     :param filename: The name of the annot file
     """
-    base_path = os.path.join(os.path.dirname(__file__), f"../training/tmp/convert/")
+    base_path = os.path.join(os.path.dirname(__file__), "../training/tmp/convert/")
     annot_path = os.path.join(base_path, f"{filename}.annot")
     json_path = os.path.join(base_path, f"{filename}.json")
 
-    annot = open(annot_path, "r").readlines()
+    annot = open(annot_path).readlines()
 
-    out = {
+    out: AnnotOutput = {
         "id": str(uuid.uuid4()),
         "name": f"{filename}-set",
         "members": [],
@@ -40,7 +68,7 @@ def convert_annot(names_list: Sequence[str], filename: str) -> dict[str, Any]:
     return out
 
 
-def retrieve_member(line: str, out: dict[str, Any]) -> str:
+def retrieve_member(line: str, out: AnnotOutput) -> str:
     """
     Retrieve the author of the message from a .annot line.
 
@@ -63,7 +91,7 @@ def retrieve_member(line: str, out: dict[str, Any]) -> str:
 
 def retrieve_message(
     line: str,
-    out: dict[str, Any],
+    out: AnnotOutput,
     member_id: str,
     names_list: Sequence[str],
 ) -> None:
@@ -94,7 +122,7 @@ def retrieve_message(
     )
 
 
-def reformat_mention(message: str, out: dict[str, Any], names_list: Sequence[str]) -> str:
+def reformat_mention(message: str, out: AnnotOutput, names_list: Sequence[str]) -> str:
     """
     Reformat the content of the message if a mention to a member is found.
 

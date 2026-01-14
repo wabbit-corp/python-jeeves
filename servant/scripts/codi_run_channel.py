@@ -8,14 +8,15 @@ import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from servant.defs import GlobalContext
+    from typed_json import JSON, JSONDict
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
-
-from servant.defs import ALL_SECRETS, GlobalContext, SECRET_OPENAI_KEY
-from typed_json import JSON, JSONDict, coerce_str
-from servant.modules import background_indexer, codi_conversation_indexer
 
 
 def _load_yaml_config(path: Path) -> dict[str, JSON]:
@@ -42,6 +43,8 @@ def _get_value(d: dict[str, JSON], key: str, default: JSON = "") -> JSON:
 
 
 def _load_secrets(ctx: GlobalContext, config: dict[str, JSON]) -> None:
+    from servant.defs import ALL_SECRETS, SECRET_OPENAI_KEY
+
     for secret in ALL_SECRETS:
         value = _get_value(config, secret, None)
         if value is not None:
@@ -95,6 +98,8 @@ def _query_output(
     max_messages_per_conversation: int,
     max_message_length: int,
 ) -> JSONDict:
+    from servant.modules import background_indexer
+
     dbfile = background_indexer._db_path(ctx)
     conn = background_indexer._connect(dbfile)
     try:
@@ -225,6 +230,10 @@ def _query_output(
 
 
 async def _run(args: argparse.Namespace) -> int:
+    from servant.defs import SECRET_OPENAI_KEY, GlobalContext
+    from servant.modules import codi_conversation_indexer
+    from typed_json import coerce_str
+
     ctx = GlobalContext()
 
     config = _load_yaml_config(Path(".private.yml"))

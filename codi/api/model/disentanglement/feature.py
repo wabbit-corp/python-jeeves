@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import builtins
 import os
-
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from ..input.message import Message
-    from ..input.community import Community
+
+FeatureValue = float | int | list[float | int]
 
 
 class Feature:
@@ -16,7 +16,7 @@ class Feature:
     """
 
     def __init__(self) -> None:
-        self._val: float | int | None = None
+        self._val: FeatureValue | None = None
         self._message_1: Message | None = None
         self._message_2: Message | None = None
 
@@ -60,13 +60,13 @@ class Feature:
 
     message_2 = builtins.property(_get_message_2, _set_message_2)
 
-    def _get_val(self) -> float | int | None:
+    def _get_val(self) -> FeatureValue | None:
         """
         :type: Any
         """
         return self._val
 
-    def _set_val(self, val: float | int) -> None:
+    def _set_val(self, val: FeatureValue) -> None:
         """
         Set the value of the feature.
 
@@ -86,7 +86,7 @@ class Feature:
         """
         file_path = os.path.join(os.path.dirname(__file__), f"../../collections/{file_name}")
 
-        with open(file_path, "r") as file:
+        with open(file_path) as file:
             collection = [line.strip() for line in file.readlines()]
 
         return collection
@@ -98,9 +98,9 @@ class Feature:
 
         :return: The default features list
         """
-        from ..disentanglement.content import Repeat, Tech, ContainsCode, ContainsLink
-        from ..disentanglement.discourse import CueWords, Question, Long, Greet, Thanks
-        from ..disentanglement.chat import Time, Speaker, CrossAuthorMention, MentionSame, MentionOther, HasMention
+        from ..disentanglement.chat import CrossAuthorMention, HasMention, MentionOther, MentionSame, Speaker, Time
+        from ..disentanglement.content import ContainsCode, ContainsLink, Repeat, Tech
+        from ..disentanglement.discourse import CueWords, Greet, Long, Question, Thanks
 
         return [
             Repeat,
@@ -119,6 +119,14 @@ class Feature:
             MentionOther,
             HasMention,
         ]
+
+    @staticmethod
+    def get_group_features() -> list[type[Feature]]:
+        raise NotImplementedError
+
+    @classmethod
+    def extract(cls, message_1: Message, message_2: Message) -> Feature:
+        raise NotImplementedError
 
     @classmethod
     def get_features(
@@ -146,14 +154,13 @@ class Feature:
         features: list[Feature] = []
 
         for feature_type in features_type_list:
-            feature_cls = cast(Any, feature_type)
             if feature_type == Time:
-                features.append(feature_cls.extract(message_1, message_2, int(hyper_params["chat bins"])))
+                features.append(Time.extract(message_1, message_2, int(hyper_params["chat bins"])))
             elif feature_type == Long:
-                features.append(feature_cls.extract(message_1, message_2, int(hyper_params["discourse max words"])))
+                features.append(Long.extract(message_1, message_2, int(hyper_params["discourse max words"])))
             elif feature_type == Repeat:
-                features.append(feature_cls.extract(message_1, message_2, unigram_probabilities))
+                features.append(Repeat.extract(message_1, message_2, unigram_probabilities))
             else:
-                features.append(feature_cls.extract(message_1, message_2))
+                features.append(feature_type.extract(message_1, message_2))
 
         return features

@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import builtins
+from collections.abc import Sequence
 from typing import TYPE_CHECKING
+
+from typed_json import JSONDict, coerce_str
 
 if TYPE_CHECKING:
     from .message import Message
@@ -12,14 +15,14 @@ class Attachment:
     This class represents an attachment in a message.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._url: str | None = None
         self._message: Message | None = None
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return self.__str__()
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"{self.__class__}: {self._url}"
 
     def _get_url(self) -> str:
@@ -77,8 +80,8 @@ class Attachment:
     @classmethod
     def retrieve_attachments(
         cls,
-        attachments: list[dict[str, str]],
-        message: Message,
+        attachments: Sequence[JSONDict],
+        message: Message | None,
     ) -> list[Attachment]:
         """
         Retrieve a list of attachments from a dictionary.
@@ -87,4 +90,11 @@ class Attachment:
         :param message: The message of the attachments
         :return: The list of attachments
         """
-        return [Attachment().deserialize(attachment["url"], message) for attachment in attachments]
+        retrieved: list[Attachment] = []
+        for attachment in attachments:
+            url_value = attachment.get("url")
+            if url_value is None:
+                url_value = attachment.get("urls")
+            url = coerce_str(url_value, field="url")
+            retrieved.append(Attachment().deserialize(url, message))
+        return retrieved

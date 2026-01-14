@@ -9,6 +9,8 @@ from pathlib import Path
 from textwrap import dedent
 from typing import TypeGuard
 
+import discord
+import discord.utils
 import openai
 from openai import AsyncOpenAI
 from openai.types.chat import (
@@ -21,20 +23,18 @@ from openai.types.chat import (
     ChatCompletionUserMessageParam,
 )
 from openai.types.shared_params.function_definition import FunctionDefinition
-import discord
-import discord.utils
 
 from servant.defs import (
-    ToolDef,
-    Personality,
-    discover_modules,
-    GlobalContext,
-    SECRET_OPENAI_KEY,
-    SECRET_DISCORD_TOKEN,
     ALL_SECRETS,
+    SECRET_DISCORD_TOKEN,
+    SECRET_OPENAI_KEY,
+    GlobalContext,
+    Personality,
+    ToolDef,
+    discover_modules,
 )
-from typed_json import JSON, JSONDict, coerce_str, obj_to_json
 from servant.modules import background_indexer, topic_subscriptions
+from typed_json import JSON, JSONDict, coerce_str, obj_to_json
 
 _LOGGER = logging.getLogger(__name__ if __name__ != "__main__" else "jove")
 
@@ -235,6 +235,7 @@ def _build_tool_param(schema: JSONDict) -> ChatCompletionToolParam | None:
     description = schema.get("description")
     description_str = description if isinstance(description, str) else None
     parameters_raw = schema.get("parameters")
+    parameters: dict[str, object]
     if isinstance(parameters_raw, dict):
         parameters = {str(k): v for k, v in parameters_raw.items()}
     else:
@@ -407,6 +408,8 @@ async def handle_incoming_message(
                             tool_name,
                         )
                         continue
+                    tool_result: JSONDict
+
                     try:
                         parsed_args = json.loads(tool_args_raw)
                     except json.JSONDecodeError as e:
@@ -415,7 +418,7 @@ async def handle_incoming_message(
                             tool_name,
                             e,
                         )
-                        tool_result: JSONDict = {
+                        tool_result = {
                             "success": False,
                             "error": "Tool arguments were not valid JSON.",
                         }
@@ -438,7 +441,7 @@ async def handle_incoming_message(
 
                     if tool_def is None:
                         _LOGGER.error(f"Tool {tool_name} not found in modules.")
-                        tool_result: JSONDict = {
+                        tool_result = {
                             "success": False,
                             "error": f"Tool {tool_name} not found in modules.",
                         }
@@ -1021,7 +1024,9 @@ async def main() -> None:
 
 
 if __name__ == "__main__":
-    import sys, asyncio, os
+    import asyncio
+    import os
+    import sys
 
     if sys.platform.lower() == "win32":
         os.system("color")

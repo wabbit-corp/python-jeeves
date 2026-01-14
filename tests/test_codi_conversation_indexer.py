@@ -6,7 +6,7 @@ from servant.modules import codi_conversation_indexer as indexer
 
 
 class TestCodiConversationIndexer(unittest.TestCase):
-    def test_assign_conversation_ids_with_overlap(self):
+    def test_assign_conversation_ids_with_overlap(self) -> None:
         predicted = {
             "T1": ["m1", "m2", "m5"],
             "T2": ["m3", "m4"],
@@ -23,7 +23,7 @@ class TestCodiConversationIndexer(unittest.TestCase):
         self.assertEqual(assignments["T2"], "c2")
         self.assertEqual(new_ids, [])
 
-    def test_assign_conversation_ids_creates_new(self):
+    def test_assign_conversation_ids_creates_new(self) -> None:
         predicted = {"T1": ["m9"]}
         existing = {"c1": {"m1", "m2"}}
         assignments, new_ids = indexer._assign_conversation_ids(
@@ -33,38 +33,80 @@ class TestCodiConversationIndexer(unittest.TestCase):
         self.assertEqual(assignments["T1"], "new")
         self.assertEqual(new_ids, ["new"])
 
-    def test_hash_conversation_changes_on_content(self):
-        messages_a = [
-            {"id": "m1", "author_id": "u1", "content": "hello"},
-            {"id": "m2", "author_id": "u2", "content": "world"},
+    def test_hash_conversation_changes_on_content(self) -> None:
+        messages_a: list[indexer.MessagePayload] = [
+            {
+                "id": "m1",
+                "author_id": "u1",
+                "author_name": "Alice",
+                "content": "hello",
+                "timestamp": "1",
+                "created_at": None,
+            },
+            {
+                "id": "m2",
+                "author_id": "u2",
+                "author_name": "Bob",
+                "content": "world",
+                "timestamp": "2",
+                "created_at": None,
+            },
         ]
-        messages_b = [
-            {"id": "m1", "author_id": "u1", "content": "hello"},
-            {"id": "m2", "author_id": "u2", "content": "changed"},
+        messages_b: list[indexer.MessagePayload] = [
+            {
+                "id": "m1",
+                "author_id": "u1",
+                "author_name": "Alice",
+                "content": "hello",
+                "timestamp": "1",
+                "created_at": None,
+            },
+            {
+                "id": "m2",
+                "author_id": "u2",
+                "author_name": "Bob",
+                "content": "changed",
+                "timestamp": "2",
+                "created_at": None,
+            },
         ]
         hash_a = indexer._hash_conversation(messages_a)
         hash_b = indexer._hash_conversation(messages_b)
 
         self.assertNotEqual(hash_a, hash_b)
 
-    def test_sample_messages_for_naming_keeps_edges(self):
-        messages = [{"id": str(i)} for i in range(6)]
+    def test_sample_messages_for_naming_keeps_edges(self) -> None:
+        messages: list[indexer.MessagePayload] = [
+            {
+                "id": str(i),
+                "author_id": "u1",
+                "author_name": "User",
+                "content": "",
+                "timestamp": str(i),
+                "created_at": None,
+            }
+            for i in range(6)
+        ]
         sampled = indexer._sample_messages_for_naming(messages, max_messages=4)
 
         self.assertEqual([msg["id"] for msg in sampled], ["0", "1", "4", "5"])
 
-    def test_format_messages_for_prompt_truncates(self):
-        messages = [
+    def test_format_messages_for_prompt_truncates(self) -> None:
+        messages: list[indexer.MessagePayload] = [
             {
+                "id": "m1",
+                "author_id": "u1",
                 "author_name": "Alice",
                 "content": "hello    there\\nfriend",
+                "timestamp": "1",
+                "created_at": None,
             }
         ]
         text = indexer._format_messages_for_prompt(messages, max_chars=10)
 
         self.assertEqual(text, "Alice: hello t...")
 
-    def test_select_channels_to_analyze_filters_up_to_date(self):
+    def test_select_channels_to_analyze_filters_up_to_date(self) -> None:
         conn = sqlite3.connect(":memory:")
         conn.row_factory = sqlite3.Row
         conn.executescript(
@@ -123,7 +165,7 @@ class TestCodiConversationIndexer(unittest.TestCase):
         self.assertEqual(len(batches), 1)
         self.assertEqual(batches[0].channel_id, "c2")
 
-    def test_module_state_is_cached(self):
+    def test_module_state_is_cached(self) -> None:
         ctx = GlobalContext()
         state1 = indexer._module_state(ctx)
         state2 = indexer._module_state(ctx)

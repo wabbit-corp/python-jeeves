@@ -1,7 +1,9 @@
+from __future__ import annotations
+
 import re
 
-from .feature import Feature
 from ..input.message import Message
+from .feature import Feature
 
 
 class Discourse(Feature):
@@ -9,11 +11,11 @@ class Discourse(Feature):
     This class represents a feature that is discourse-related.
     """
 
-    def __str__(self):
+    def __str__(self) -> str:
         return "Discourse"
 
     @staticmethod
-    def get_group_features():
+    def get_group_features() -> list[type[Feature]]:
         """
         Return the discourse-related features
 
@@ -27,7 +29,7 @@ class CueWords(Discourse):
     This class represents a 'cue words' feature.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self._thanks_answer = self._get_collection_from_file("cue_words_thanks_answer")
         self._thanks = self._get_collection_from_file("cue_words_thanks")
@@ -36,7 +38,7 @@ class CueWords(Discourse):
         self._sub_features = [self._answer, self._thanks, self._thanks_answer]
 
     @staticmethod
-    def _get_sub_features(sub_feature: list[str], message1: str, message2: str):
+    def _get_sub_features(sub_feature: list[str], message1: str, message2: str) -> list[int]:
         one_hot = [0, 0]
 
         for cue_word in sub_feature:
@@ -49,7 +51,7 @@ class CueWords(Discourse):
         return one_hot
 
     @classmethod
-    def extract(cls, message1: Message, message2: Message):
+    def extract(cls, message1: Message, message2: Message) -> CueWords:
         """
         This method checks if either message has a cue word in it. This feature has 6 bits.
 
@@ -78,12 +80,12 @@ class Question(Discourse):
     This class represents a 'question' feature.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self._question_words = self._get_collection_from_file("question_words")
 
     @classmethod
-    def extract(cls, message1: Message, message2: Message):
+    def extract(cls, message1: Message, message2: Message) -> Question:
         """
         This method checks if either message is a question. This feature has 2 bits.
 
@@ -119,7 +121,7 @@ class Long(Discourse):
     """
 
     @classmethod
-    def extract(cls, message1: Message, message2: Message, words_n: int = 10):
+    def extract(cls, message1: Message, message2: Message, words_n: int = 10) -> Long:
         """
         This method checks if either message is longer than 'words_n' words. This feature has 2 bits.
 
@@ -148,7 +150,7 @@ class Greet(Discourse):
     """
 
     @classmethod
-    def extract(cls, message1: Message, message2: Message):
+    def extract(cls, message1: Message, message2: Message) -> Greet:
         """
         This method checks if either message contains a greeting expression. This feature has 2 bits.
 
@@ -178,7 +180,7 @@ class Thanks(Discourse):
     """
 
     @classmethod
-    def extract(cls, message1: Message, message2: Message):
+    def extract(cls, message1: Message, message2: Message) -> Thanks:
         """
         This method checks if either message contains a 'thank you' expression. This feature has 2 bits.
 

@@ -2,13 +2,15 @@ from __future__ import annotations
 
 import builtins
 
+from typed_json import JSONDict, coerce_str
+
 
 class Entity:
     """
     This class represents a generic entity which has an id.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._uuid: str | None = None
 
     def _get_uuid(self) -> str:
@@ -25,10 +27,11 @@ class Entity:
 
     uuid = builtins.property(_get_uuid, _set_uuid)
 
-    def deserialize(self, data: dict):
+    def deserialize(self, data: JSONDict) -> Entity:
         """
         Deserialize an entity into an Entity object.
 
         :param data: The JSON data to deserialize
         """
-        self.uuid = data["id"]
+        self.uuid = coerce_str(data.get("id"), field="id")
+        return self

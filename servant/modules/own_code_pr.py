@@ -1,19 +1,15 @@
 from __future__ import annotations
 
-import os
-import re
-import base64
-import datetime as _dt
-import uuid
 import asyncio
-from dataclasses import dataclass
-
-from typed_json import JSON, JSONDict, coerce_str, require_obj
-from servant.defs import ToolDef, SECRET_GITHUB_TOKEN, GlobalContext
+import datetime as _dt
+import re
+import uuid
 
 from github import Github
 from github.GithubException import GithubException, UnknownObjectException
 
+from servant.defs import SECRET_GITHUB_TOKEN, GlobalContext, ToolDef
+from typed_json import JSON, JSONDict, coerce_str, require_obj
 
 _REPO_FULL_NAME = "wabbit-corp/python-jeeves"
 _ALLOWED_DIR_PREFIX = "servant/modules/"

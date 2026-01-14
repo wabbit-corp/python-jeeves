@@ -1,6 +1,6 @@
-from django.urls import path, include
+from django.urls import include, path
 
-from ..views import *
+from ..views import ConvertView, PredictView, TrainingView, ValidateView
 
 urlpatterns = [
     path("predict", PredictView.as_view(), name="predict"),

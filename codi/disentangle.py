@@ -3,13 +3,54 @@ from __future__ import annotations
 import os
 import sys
 import threading
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, TypedDict
+
+if TYPE_CHECKING:
+    from codi.api.model.disentanglement.feature import Feature
+    from codi.api.model.disentanglement.model import Model as CodiModel
+
 
 _MODEL_LOCK = threading.Lock()
-_MODEL = None
-_MODEL_DIR: Optional[Path] = None
-_CODI_IMPORT_ERROR: Optional[Exception] = None
+_MODEL: CodiModel | None = None
+_MODEL_DIR: Path | None = None
+_CODI_IMPORT_ERROR: Exception | None = None
+
+
+class NormalizedMessage(TypedDict):
+    id: str
+    authorId: str
+    authorName: str
+    content: str
+    timestamp: str
+
+
+class CommunityMessage(TypedDict):
+    id: str
+    authorId: str
+    content: str
+    timestamp: str
+
+
+class CommunityMember(TypedDict):
+    id: str
+    name: str
+
+
+class CommunityChannel(TypedDict):
+    id: str
+    path: str
+    topics: list[object]
+    messages: list[CommunityMessage]
+
+
+class CommunityPayload(TypedDict):
+    platform: str
+    id: str
+    name: str
+    members: list[CommunityMember]
+    channels: list[CommunityChannel]
 
 
 def _repo_root() -> Path:
@@ -25,40 +66,44 @@ def _ensure_codi_imported() -> None:
     if _CODI_IMPORT_ERROR is not None:
         raise RuntimeError(f"CODI import failed: {_CODI_IMPORT_ERROR}") from _CODI_IMPORT_ERROR
 
-    if "api.model.disentanglement.model" in sys.modules:
+    if "codi.api.model.disentanglement.model" in sys.modules:
         return
 
     codi_pkg_root = _repo_root() / "codi"
     if not codi_pkg_root.exists():
         raise RuntimeError(f"CODI not found at {codi_pkg_root}")
 
-    if str(codi_pkg_root) not in sys.path:
-        sys.path.insert(0, str(codi_pkg_root))
-
     try:
-        from api.model.disentanglement.model import Model  # type: ignore[import-not-found]  # noqa: F401
-        from api.model.disentanglement.chat import Chat  # type: ignore[import-not-found]  # noqa: F401
-        from api.model.disentanglement.discourse import Discourse  # type: ignore[import-not-found]  # noqa: F401
-        from api.model.disentanglement.content import Content  # type: ignore[import-not-found]  # noqa: F401
-        from api.model.input.community import Community  # type: ignore[import-not-found]  # noqa: F401
+        from importlib import import_module
+
+        import_module("codi.api.model.disentanglement.model")
+        import_module("codi.api.model.disentanglement.chat")
+        import_module("codi.api.model.disentanglement.discourse")
+        import_module("codi.api.model.disentanglement.content")
+        import_module("codi.api.model.input.community")
     except Exception as exc:
         _CODI_IMPORT_ERROR = exc
         raise RuntimeError(f"CODI import failed: {exc}") from exc
 
 
-def _get_model(model_dir: Path):
+def _get_model(model_dir: Path) -> CodiModel:
     global _MODEL, _MODEL_DIR
     with _MODEL_LOCK:
         if _MODEL is None or _MODEL_DIR != model_dir:
             os.environ["CODI_MODEL_DIR"] = str(model_dir)
-            from api.model.disentanglement.model import Model
+            from importlib import import_module
 
-            _MODEL = Model()
+            module = import_module("codi.api.model.disentanglement.model")
+            model_cls = getattr(module, "Model", None)
+            if model_cls is None or not isinstance(model_cls, type):
+                raise RuntimeError("CODI Model class not found.")
+            _MODEL = model_cls()
             _MODEL_DIR = model_dir
+    assert _MODEL is not None
     return _MODEL
 
 
-def _normalize_platform(value: Any) -> str:
+def _normalize_platform(value: object) -> str:
     if value is None:
         return "discord"
     platform = str(value).strip().lower()
@@ -67,10 +112,10 @@ def _normalize_platform(value: Any) -> str:
     return platform
 
 
-def _resolve_features(names: Optional[List[str]]):
-    from api.model.disentanglement.chat import Chat
-    from api.model.disentanglement.discourse import Discourse
-    from api.model.disentanglement.content import Content
+def _resolve_features(names: Sequence[str] | None) -> list[type[Feature]]:
+    from codi.api.model.disentanglement.chat import Chat
+    from codi.api.model.disentanglement.content import Content
+    from codi.api.model.disentanglement.discourse import Discourse
 
     if not names:
         names = ["chat", "discourse", "content"]
@@ -78,7 +123,7 @@ def _resolve_features(names: Optional[List[str]]):
     if "all" in normalized:
         normalized = ["chat", "discourse", "content"]
 
-    features = []
+    features: list[type[Feature]] = []
     unknown = []
 
     for name in normalized:
@@ -97,14 +142,14 @@ def _resolve_features(names: Optional[List[str]]):
     return features
 
 
-def _first_present(message: Dict[str, Any], keys: List[str]) -> Any:
+def _first_present(message: dict[str, object], keys: Sequence[str]) -> object | None:
     for key in keys:
         if key in message and message[key] is not None:
             return message[key]
     return None
 
 
-def _normalize_message(message: Dict[str, Any], index: int) -> Dict[str, Any]:
+def _normalize_message(message: dict[str, object], index: int) -> NormalizedMessage:
     msg_id = _first_present(message, ["id", "message_id", "messageId"])
     if msg_id is None:
         msg_id = str(index)
@@ -150,15 +195,15 @@ def _normalize_message(message: Dict[str, Any], index: int) -> Dict[str, Any]:
 
 
 def _build_community(
-    messages: List[Dict[str, Any]],
+    messages: Sequence[dict[str, object]],
     platform: str,
     community_id: str,
     community_name: str,
     channel_id: str,
     channel_name: str,
-) -> Dict[str, Any]:
-    members: Dict[str, Dict[str, str]] = {}
-    normalized_messages: List[Dict[str, Any]] = []
+) -> CommunityPayload:
+    members: dict[str, CommunityMember] = {}
+    normalized_messages: list[CommunityMessage] = []
 
     for idx, message in enumerate(messages):
         normalized = _normalize_message(message, idx)

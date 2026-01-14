@@ -5,7 +5,17 @@ import argparse
 import json
 import os
 import sys
+from collections.abc import Sequence
 from pathlib import Path
+from typing import TYPE_CHECKING, Protocol
+
+if TYPE_CHECKING:
+    from codi.api.model.disentanglement.feature import Feature
+
+
+class FeatureGroup(Protocol):
+    @staticmethod
+    def get_group_features() -> list[type[Feature]]: ...
 
 
 def _add_codi_to_path() -> Path:
@@ -15,21 +25,26 @@ def _add_codi_to_path() -> Path:
     return repo_root
 
 
-def _resolve_features(names, Chat, Discourse, Content):
+def _resolve_features(
+    names: Sequence[str],
+    chat_cls: FeatureGroup,
+    discourse_cls: FeatureGroup,
+    content_cls: FeatureGroup,
+) -> list[type[Feature]]:
     normalized = [name.lower() for name in names]
     if not normalized or "all" in normalized:
         normalized = ["chat", "discourse", "content"]
 
-    features = []
-    unknown = []
+    features: list[type[Feature]] = []
+    unknown: list[str] = []
 
     for name in normalized:
         if name == "chat":
-            features.extend(Chat.get_group_features())
+            features.extend(chat_cls.get_group_features())
         elif name == "discourse":
-            features.extend(Discourse.get_group_features())
+            features.extend(discourse_cls.get_group_features())
         elif name == "content":
-            features.extend(Content.get_group_features())
+            features.extend(content_cls.get_group_features())
         else:
             unknown.append(name)
 
@@ -74,10 +89,10 @@ def main() -> int:
 
     repo_root = _add_codi_to_path()
 
-    from codi.api.model.disentanglement.model import Model
     from codi.api.model.disentanglement.chat import Chat
-    from codi.api.model.disentanglement.discourse import Discourse
     from codi.api.model.disentanglement.content import Content
+    from codi.api.model.disentanglement.discourse import Discourse
+    from codi.api.model.disentanglement.model import Model
     from codi.api.model.input.community import Community
 
     training_path = Path(args.training_json).expanduser().resolve()

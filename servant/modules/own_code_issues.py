@@ -2,14 +2,14 @@ from __future__ import annotations
 
 import asyncio
 
-from typed_json import JSON, JSONDict, coerce_str, obj_to_json, require_obj
-from servant.defs import GlobalContext, ToolDef, SECRET_GITHUB_TOKEN
-
 from github import Github
 from github.GithubException import GithubException
 from github.Issue import Issue
 from github.Label import Label
 from github.Repository import Repository
+
+from servant.defs import SECRET_GITHUB_TOKEN, GlobalContext, ToolDef
+from typed_json import JSON, JSONDict, coerce_str, obj_to_json, require_obj
 
 _REPO_FULL_NAME = "wabbit-corp/python-jeeves"
 
@@ -54,7 +54,7 @@ def _create_issue_sync(token: str, title: str, body: str, label_names: list[str]
     try:
         if labels:
             issue: Issue = repo.create_issue(title="[Vox] " + title, body=body, labels=labels)
-            used = [l.name for l in labels]
+            used = [label.name for label in labels]
         else:
             issue = repo.create_issue(title="[Vox] " + title, body=body)
             used = []

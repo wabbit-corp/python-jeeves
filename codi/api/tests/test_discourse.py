@@ -1,11 +1,11 @@
 import os
 
+from codi.api.model.disentanglement.discourse import CueWords, Long, Question
 from codi.api.tests.framework import Framework
-from codi.api.model.disentanglement.discourse import *
 
 
 class TestDiscourse(Framework):
-    def setUp(self, path: str | None = None):
+    def setUp(self, path: str | None = None) -> None:
         assert path is not None
         path = os.path.join(os.path.dirname(__file__), f"./fixture_data/{path}")
         data = self._read_data_from_fixtures(path)
@@ -14,10 +14,10 @@ class TestDiscourse(Framework):
 
 
 class TestCueWords(TestDiscourse):
-    def setUp(self, path: str | None = None):
+    def setUp(self, path: str | None = None) -> None:
         super().setUp("./community_for_cue_words_feature_extraction.json")
 
-    def test_no_cue_words(self):
+    def test_no_cue_words(self) -> None:
         self.assertEqual(
             self._get_feature(
                 CueWords.extract, self._messages["940033847800766474"], self._messages["939964765420273684"]
@@ -25,7 +25,7 @@ class TestCueWords(TestDiscourse):
             [0, 0, 0, 0, 0, 0],
         )
 
-    def test_thanks_answer_in_first_message(self):
+    def test_thanks_answer_in_first_message(self) -> None:
         self.assertEqual(
             self._get_feature(
                 CueWords.extract, self._messages["939541995662217246"], self._messages["938733699669848064"]
@@ -33,7 +33,7 @@ class TestCueWords(TestDiscourse):
             [0, 0, 0, 0, 1, 0],
         )
 
-    def test_answer_in_second_message(self):
+    def test_answer_in_second_message(self) -> None:
         self.assertEqual(
             self._get_feature(
                 CueWords.extract, self._messages["939541995662211231"], self._messages["938733699669848234"]
@@ -41,7 +41,7 @@ class TestCueWords(TestDiscourse):
             [0, 1, 0, 0, 0, 0],
         )
 
-    def test_thanks_in_first_message(self):
+    def test_thanks_in_first_message(self) -> None:
         self.assertEqual(
             self._get_feature(
                 CueWords.extract, self._messages["939541995662213984"], self._messages["9387336996698405948"]
@@ -49,7 +49,7 @@ class TestCueWords(TestDiscourse):
             [0, 0, 1, 0, 0, 0],
         )
 
-    def test_mixed_cue_words(self):
+    def test_mixed_cue_words(self) -> None:
         self.assertEqual(
             self._get_feature(
                 CueWords.extract, self._messages["9395419956622102938"], self._messages["9387336903928844231"]
@@ -57,7 +57,7 @@ class TestCueWords(TestDiscourse):
             [0, 1, 1, 0, 1, 0],
         )
 
-    def test_all_cue_words(self):
+    def test_all_cue_words(self) -> None:
         self.assertEqual(
             self._get_feature(
                 CueWords.extract, self._messages["939541995662215167"], self._messages["938733699669844231"]
@@ -67,10 +67,10 @@ class TestCueWords(TestDiscourse):
 
 
 class TestQuestion(TestDiscourse):
-    def setUp(self, path: str | None = None):
+    def setUp(self, path: str | None = None) -> None:
         super().setUp("./community_for_question_feature_extraction.json")
 
-    def test_question_in_first_message(self):
+    def test_question_in_first_message(self) -> None:
         self.assertEqual(
             self._get_feature(
                 Question.extract, self._messages["940033847800766474"], self._messages["939964765420273684"]
@@ -78,7 +78,7 @@ class TestQuestion(TestDiscourse):
             [1, 0, 1, 0],
         )
 
-    def test_question_in_second_message(self):
+    def test_question_in_second_message(self) -> None:
         self.assertEqual(
             self._get_feature(
                 Question.extract, self._messages["9395419956622150493"], self._messages["9387336996698401922"]
@@ -86,7 +86,7 @@ class TestQuestion(TestDiscourse):
             [0, 0, 0, 1],
         )
 
-    def test_question_in_both_messages(self):
+    def test_question_in_both_messages(self) -> None:
         self.assertEqual(
             self._get_feature(
                 Question.extract, self._messages["939541995662217246"], self._messages["938733699669848064"]
@@ -94,7 +94,7 @@ class TestQuestion(TestDiscourse):
             [1, 0, 0, 1],
         )
 
-    def test_question_in_none_of_the_messages(self):
+    def test_question_in_none_of_the_messages(self) -> None:
         self.assertEqual(
             self._get_feature(
                 Question.extract, self._messages["939541995662211231"], self._messages["938733699669848234"]
@@ -104,10 +104,10 @@ class TestQuestion(TestDiscourse):
 
 
 class TestLong(TestDiscourse):
-    def setUp(self, path: str | None = None):
+    def setUp(self, path: str | None = None) -> None:
         super().setUp("./community_for_long_feature_extraction.json")
 
-    def test_long_in_both_message(self):
+    def test_long_in_both_message(self) -> None:
         self.assertEqual(
             self._get_feature(
                 Long.extract, self._messages["940033847800766474"], self._messages["939964765420273684"]
@@ -115,7 +115,7 @@ class TestLong(TestDiscourse):
             [1, 1],
         )
 
-    def test_long_in_first_message(self):
+    def test_long_in_first_message(self) -> None:
         self.assertEqual(
             self._get_feature(
                 Long.extract, self._messages["939541995662217246"], self._messages["938733699669848064"]
@@ -123,7 +123,7 @@ class TestLong(TestDiscourse):
             [1, 0],
         )
 
-    def test_long_in_second_message(self):
+    def test_long_in_second_message(self) -> None:
         self.assertEqual(
             self._get_feature(
                 Long.extract, self._messages["939541995662211231"], self._messages["938733699669848234"]
@@ -131,7 +131,7 @@ class TestLong(TestDiscourse):
             [0, 1],
         )
 
-    def test_long_in_none_of_the_messages(self):
+    def test_long_in_none_of_the_messages(self) -> None:
         self.assertEqual(
             self._get_feature(
                 Long.extract, self._messages["939541995662239281"], self._messages["938733638291848234"]

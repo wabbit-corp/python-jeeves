@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-import re
 import math
-
+import re
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
@@ -17,11 +16,11 @@ class Content(Feature):
     This class represents a feature that is content-related.
     """
 
-    def __str__(self):
+    def __str__(self) -> str:
         return "Content"
 
     @staticmethod
-    def get_group_features():
+    def get_group_features() -> list[type[Feature]]:
         """
         Return the content-related features
 
@@ -36,7 +35,11 @@ class Repeat(Content):
     """
 
     @staticmethod
-    def _get_common_words(message1: Message, message2: Message, unigram_probabilities: dict[str, float]):
+    def _get_common_words(
+        message1: Message,
+        message2: Message,
+        unigram_probabilities: dict[str, float],
+    ) -> list[str]:
         """
         Find which words are in common between the two messages.
 
@@ -53,7 +56,12 @@ class Repeat(Content):
         return list(message1_words & message2_words & unigram_probabilities.keys())
 
     @classmethod
-    def extract(cls, message1: Message, message2: Message, unigram_probabilities: dict[str, float]):
+    def extract(
+        cls,
+        message1: Message,
+        message2: Message,
+        unigram_probabilities: dict[str, float] | None = None,
+    ) -> Repeat:
         """
         Given a set of all the community messages, compute the unigram probabilities. After which, find how many
         words are in common between the two messages, and bin them logarithmically. This feature has 10 bits.
@@ -63,6 +71,9 @@ class Repeat(Content):
         :param unigram_probabilities: The unigram probabilities
         :return: The one-hot vector of the repeated words
         """
+        if unigram_probabilities is None:
+            raise ValueError("unigram_probabilities is required for Repeat.extract")
+
         bin_size = 5
         one_hot = [0] * bin_size
         common_words = cls()._get_common_words(message1, message2, unigram_probabilities)
@@ -91,7 +102,7 @@ class Tech(Content):
     """
 
     @classmethod
-    def extract(cls, message1: Message, message2: Message):
+    def extract(cls, message1: Message, message2: Message) -> Tech:
         """
         Given two messages, check if both messages contain technical jargon, only one does, or neither do. This feature
         has 3 bits.
@@ -130,7 +141,7 @@ class ContainsCode(Content):
     """
 
     @classmethod
-    def extract(cls, message1: Message, message2: Message):
+    def extract(cls, message1: Message, message2: Message) -> ContainsCode:
         """
         This method checks if either message contains a code block. This feature has 2 bits.
 
@@ -157,7 +168,7 @@ class ContainsLink(Content):
     """
 
     @classmethod
-    def extract(cls, message1: Message, message2: Message):
+    def extract(cls, message1: Message, message2: Message) -> ContainsLink:
         """
         This method checks if either message contains a link (URL). This feature has 2 bits.
 

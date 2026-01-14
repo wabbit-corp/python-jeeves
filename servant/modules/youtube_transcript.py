@@ -4,8 +4,8 @@ import csv
 import io
 import json
 import re
-from collections.abc import Callable, Iterable
-from typing import Protocol, TYPE_CHECKING, TypeGuard, TypedDict
+from collections.abc import Iterable
+from typing import TYPE_CHECKING, Protocol, TypedDict, TypeGuard
 from urllib.parse import parse_qs, urlparse
 
 from servant.defs import ToolDef
@@ -48,7 +48,7 @@ class _TranscriptItem(Protocol):
     is_translatable: bool
     language_code: str
 
-    def translate(self, language: str) -> "_TranscriptItem": ...
+    def translate(self, language: str) -> _TranscriptItem: ...
 
     def fetch(self, preserve_formatting: bool = False) -> _TranscriptFetchResult: ...
 
@@ -67,8 +67,8 @@ class _TranscriptApi(Protocol):
 class _TranscriptApiFactory(Protocol):
     def __call__(
         self,
-        proxy_config: "ProxyConfig | None" = None,
-        http_client: "Session | None" = None,
+        proxy_config: ProxyConfig | None = None,
+        http_client: Session | None = None,
     ) -> _TranscriptApi: ...
 
 
@@ -81,7 +81,7 @@ class _WebshareProxyConfigFactory(Protocol):
         retries_when_blocked: int = 10,
         domain_name: str = "p.webshare.io",
         proxy_port: int = 80,
-    ) -> "ProxyConfig": ...
+    ) -> ProxyConfig: ...
 
 
 class _GenericProxyConfigFactory(Protocol):
@@ -89,7 +89,7 @@ class _GenericProxyConfigFactory(Protocol):
         self,
         http_url: str | None = None,
         https_url: str | None = None,
-    ) -> "ProxyConfig": ...
+    ) -> ProxyConfig: ...
 
 
 def extract_video_id(url_or_id: str) -> str:
@@ -222,8 +222,8 @@ def _load_yta() -> tuple[object, _TranscriptApiFactory]:
         ) from exc
 
     def _factory(
-        proxy_config: "ProxyConfig | None" = None,
-        http_client: "Session | None" = None,
+        proxy_config: ProxyConfig | None = None,
+        http_client: Session | None = None,
     ) -> _TranscriptApi:
         return YouTubeTranscriptApi(proxy_config=proxy_config, http_client=http_client)
 
@@ -233,8 +233,8 @@ def _load_yta() -> tuple[object, _TranscriptApiFactory]:
 def _load_proxy_types() -> tuple[_WebshareProxyConfigFactory | None, _GenericProxyConfigFactory | None]:
     try:
         from youtube_transcript_api.proxies import (
-            WebshareProxyConfig,
             GenericProxyConfig,
+            WebshareProxyConfig,
         )
     except Exception:
         return None, None
@@ -341,7 +341,7 @@ async def get_youtube_transcript(opts: JSON) -> JSONDict:
         raise RuntimeError("Transcripts are unavailable for this video (disabled or age-restricted).") from exc
     except (RequestBlocked, IpBlocked) as exc:
         raise RuntimeError("YouTube is blocking your IP. Use rotating residential proxies.") from exc
-    except (VideoUnplayable,) as exc:
+    except VideoUnplayable as exc:
         raise RuntimeError("The video is unplayable.") from exc
     except PoTokenRequired as exc:
         raise RuntimeError("A PO token is required for this transcript (library limitation).") from exc

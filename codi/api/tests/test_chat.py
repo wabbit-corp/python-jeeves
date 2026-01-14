@@ -1,11 +1,11 @@
 import os
 
+from codi.api.model.disentanglement.chat import CrossAuthorMention, MentionOther, MentionSame, Speaker, Time
 from codi.api.tests.framework import Framework
-from codi.api.model.disentanglement.chat import *
 
 
 class TestChat(Framework):
-    def setUp(self, path: str | None = None):
+    def setUp(self, path: str | None = None) -> None:
         assert path is not None
         path = os.path.join(os.path.dirname(__file__), f"./fixture_data/{path}")
         data = self._read_data_from_fixtures(path)
@@ -14,10 +14,10 @@ class TestChat(Framework):
 
 
 class TestTime(TestChat):
-    def setUp(self, path: str | None = None):
+    def setUp(self, path: str | None = None) -> None:
         super().setUp("./community_for_time_feature_extraction.json")
 
-    def test_time_is_in_first_bin(self):
+    def test_time_is_in_first_bin(self) -> None:
         one_hot = [0] * 50
         one_hot[2] = 1
 
@@ -28,7 +28,7 @@ class TestTime(TestChat):
             one_hot,
         )
 
-    def test_time_is_in_second_bin(self):
+    def test_time_is_in_second_bin(self) -> None:
         one_hot = [0] * 50
         one_hot[7] = 1
 
@@ -39,7 +39,7 @@ class TestTime(TestChat):
             one_hot,
         )
 
-    def test_time_is_in_third_bin(self):
+    def test_time_is_in_third_bin(self) -> None:
         one_hot = [0] * 50
         one_hot[14] = 1
 
@@ -50,7 +50,7 @@ class TestTime(TestChat):
             one_hot,
         )
 
-    def test_time_is_not_in_bin(self):
+    def test_time_is_not_in_bin(self) -> None:
         one_hot = [0] * 50
         one_hot[27] = 1
 
@@ -63,10 +63,10 @@ class TestTime(TestChat):
 
 
 class TestSpeaker(TestChat):
-    def setUp(self, path: str | None = None):
+    def setUp(self, path: str | None = None) -> None:
         super().setUp("./community_for_speaker_feature_extraction.json")
 
-    def test_speaker_is_the_same(self):
+    def test_speaker_is_the_same(self) -> None:
         self.assertEqual(
             self._get_feature(
                 Speaker.extract, self._messages["940033847800766474"], self._messages["939964765420273684"]
@@ -74,7 +74,7 @@ class TestSpeaker(TestChat):
             1,
         )
 
-    def test_speaker_is_not_the_same(self):
+    def test_speaker_is_not_the_same(self) -> None:
         self.assertEqual(
             self._get_feature(
                 Speaker.extract, self._messages["939541995662217246"], self._messages["938733699669848064"]
@@ -84,10 +84,10 @@ class TestSpeaker(TestChat):
 
 
 class TestCrossAuthorMention(TestChat):
-    def setUp(self, path: str | None = None):
+    def setUp(self, path: str | None = None) -> None:
         super().setUp("./community_for_mention_feature_extraction.json")
 
-    def test_author_is_mentioned_in_first_message(self):
+    def test_author_is_mentioned_in_first_message(self) -> None:
         self.assertEqual(
             self._get_feature(
                 CrossAuthorMention.extract, self._messages["940033847800766474"], self._messages["939964765420273684"]
@@ -95,7 +95,7 @@ class TestCrossAuthorMention(TestChat):
             [1, 0],
         )
 
-    def test_author_is_mentioned_in_second_message(self):
+    def test_author_is_mentioned_in_second_message(self) -> None:
         self.assertEqual(
             self._get_feature(
                 CrossAuthorMention.extract, self._messages["939541995662217246"], self._messages["938733699669848064"]
@@ -103,7 +103,7 @@ class TestCrossAuthorMention(TestChat):
             [0, 1],
         )
 
-    def test_both_authors_are_mentioned_in_opposite_message(self):
+    def test_both_authors_are_mentioned_in_opposite_message(self) -> None:
         self.assertEqual(
             self._get_feature(
                 CrossAuthorMention.extract, self._messages["939541995662211231"], self._messages["938733699669848234"]
@@ -111,7 +111,7 @@ class TestCrossAuthorMention(TestChat):
             [1, 1],
         )
 
-    def test_no_mention_in_messages(self):
+    def test_no_mention_in_messages(self) -> None:
         self.assertEqual(
             self._get_feature(
                 CrossAuthorMention.extract, self._messages["939541995662938471"], self._messages["938733699669038295"]
@@ -121,10 +121,10 @@ class TestCrossAuthorMention(TestChat):
 
 
 class TestMentionSame(TestChat):
-    def setUp(self, path: str | None = None):
+    def setUp(self, path: str | None = None) -> None:
         super().setUp("./community_for_mention_same_feature_extraction.json")
 
-    def test_same_mention_in_both_messages(self):
+    def test_same_mention_in_both_messages(self) -> None:
         self.assertEqual(
             self._get_feature(
                 MentionSame.extract, self._messages["940033847800766474"], self._messages["939964765420273684"]
@@ -132,7 +132,7 @@ class TestMentionSame(TestChat):
             1,
         )
 
-    def test_no_same_mention_in_fisrt_message(self):
+    def test_no_same_mention_in_fisrt_message(self) -> None:
         self.assertEqual(
             self._get_feature(
                 MentionSame.extract, self._messages["939541995662217246"], self._messages["938733699669848064"]
@@ -140,7 +140,7 @@ class TestMentionSame(TestChat):
             0,
         )
 
-    def test_no_same_mention_in_second_message(self):
+    def test_no_same_mention_in_second_message(self) -> None:
         self.assertEqual(
             self._get_feature(
                 MentionSame.extract, self._messages["939541995662211231"], self._messages["938733699669848234"]
@@ -148,7 +148,7 @@ class TestMentionSame(TestChat):
             0,
         )
 
-    def test_no_mention_in_messages(self):
+    def test_no_mention_in_messages(self) -> None:
         self.assertEqual(
             self._get_feature(
                 MentionSame.extract, self._messages["939541995662938471"], self._messages["938733699669038295"]
@@ -158,10 +158,10 @@ class TestMentionSame(TestChat):
 
 
 class TestMentionOther(TestChat):
-    def setUp(self, path: str | None = None):
+    def setUp(self, path: str | None = None) -> None:
         super().setUp("./community_for_mention_other_feature_extraction.json")
 
-    def test_other_member_mention_in_first_message(self):
+    def test_other_member_mention_in_first_message(self) -> None:
         self.assertEqual(
             self._get_feature(
                 MentionOther.extract, self._messages["940033847800766474"], self._messages["939964765420273684"]
@@ -169,7 +169,7 @@ class TestMentionOther(TestChat):
             0,
         )
 
-    def test_other_member_mention_in_second_message(self):
+    def test_other_member_mention_in_second_message(self) -> None:
         self.assertEqual(
             self._get_feature(
                 MentionOther.extract, self._messages["939541995662217246"], self._messages["938733699669848064"]
@@ -177,7 +177,7 @@ class TestMentionOther(TestChat):
             0,
         )
 
-    def test_no_other_member_mention_in_both_messages(self):
+    def test_no_other_member_mention_in_both_messages(self) -> None:
         self.assertEqual(
             self._get_feature(
                 MentionOther.extract, self._messages["939541995662211231"], self._messages["938733699669848234"]
@@ -185,7 +185,7 @@ class TestMentionOther(TestChat):
             1,
         )
 
-    def test_no_other_member_mention_is_in_one_of_the_messages(self):
+    def test_no_other_member_mention_is_in_one_of_the_messages(self) -> None:
         self.assertEqual(
             self._get_feature(
                 MentionOther.extract, self._messages["939541995662938471"], self._messages["938733699669038295"]

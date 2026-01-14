@@ -3,6 +3,8 @@ from __future__ import annotations
 import builtins
 from typing import TYPE_CHECKING
 
+from typed_json import JSONDict, coerce_optional_str_list, coerce_str
+
 if TYPE_CHECKING:
     from .channel import Channel
 
@@ -12,7 +14,7 @@ class Topic:
     This class represents a topic of a channel.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._description: str | None = None
         self._channel: Channel | None = None
         self._keywords: list[str] = []
@@ -67,7 +69,7 @@ class Topic:
 
     channel = builtins.property(_get_channel, _set_channel)
 
-    def deserialize(self, data: dict, channel: Channel) -> Topic:
+    def deserialize(self, data: JSONDict, channel: Channel) -> Topic:
         """
         Deserialize a topic into a Topic object.
 
@@ -75,8 +77,8 @@ class Topic:
         :param channel: The channel of the topic
         :return: The deserialized Topic object
         """
-        self._keywords = [keyword for keyword in data["keywords"]]
-        self._description = data["description"]
+        self._keywords = coerce_optional_str_list(data.get("keywords")) or []
+        self._description = coerce_str(data.get("description"), field="description")
         self._channel = channel
 
         return self

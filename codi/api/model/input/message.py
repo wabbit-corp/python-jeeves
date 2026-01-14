@@ -1,15 +1,20 @@
 from __future__ import annotations
 
 import builtins
+import re
 from datetime import datetime
-from typing import TYPE_CHECKING, List
+from typing import TYPE_CHECKING
 from webbrowser import open
+
 from dateutil.parser import parse
 
-from .member import *
-from .content import *
-from .mention import *
-from .attachment import *
+from typed_json import JSONDict, coerce_optional_str, coerce_str, require_obj
+
+from .attachment import Attachment
+from .content import Code, Content, Emoji, Link, Multimedia, Text
+from .entity import Entity
+from .member import Author, Member
+from .mention import ChannelMention, MemberMention, SlackChannelMention, SlackMemberMention
 
 if TYPE_CHECKING:
     from .channel import Channel
@@ -20,7 +25,7 @@ class Message(Entity):
     This class represents a message in a channel.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self._text: str | None = None
         self._author: Author | None = None
@@ -33,24 +38,24 @@ class Message(Entity):
         self._contents: list[Content] = []
         self._words: list[str] | None = None
 
-    def __repr__(self):
-        self.__str__()
+    def __repr__(self) -> str:
+        return self.__str__()
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"Message: [{self._processable_text}]"
 
     @builtins.property
-    def words(self) -> List[str]:
+    def words(self) -> list[str]:
         """Return a list of words in lowercase of the content of this message.
         Removes special tokens (e.g., __MENTION__) based on double underscores."""
         if self._words is None:
-            self._words = self.processable_text.lower().split()
-            self._words = list(
-                filter(
-                    lambda x: (len(x) <= 4) or not (x[0] == "_" and x[1] == "_" and x[-1] == "_" and x[-2] == "_"),
-                    self._words,
-                )
-            )
+            words = self.processable_text.lower().split()
+            words = [
+                word
+                for word in words
+                if (len(word) <= 4) or not (word[0] == "_" and word[1] == "_" and word[-1] == "_" and word[-2] == "_")
+            ]
+            self._words = words
         return self._words
 
     def _get_text(self) -> str:
@@ -195,14 +200,14 @@ class Message(Entity):
 
     conversation = builtins.property(_get_conversation, _set_conversation)
 
-    def has_code_blocks(self):
+    def has_code_blocks(self) -> bool:
         """Returns True if this message has at least one code block in its content."""
         for content in self.contents:
             if isinstance(content, Code):
                 return True
         return False
 
-    def has_links(self):
+    def has_links(self) -> bool:
         """Returns True if this message has at least one link in its content."""
         for content in self.contents:
             if isinstance(content, Link):
@@ -211,7 +216,7 @@ class Message(Entity):
 
     def deserialize(
         self,
-        data: dict,
+        data: JSONDict,
         members: dict[str, Member] | None = None,
         channels: dict[str, Channel] | None = None,
         uninitialized_channels: dict[str, Channel] | None = None,
@@ -231,38 +236,43 @@ class Message(Entity):
         """
         super().deserialize(data)
 
-        assert members is not None
-        assert channels is not None
-        assert uninitialized_channels is not None
-        assert authors is not None
+        if members is None or channels is None or uninitialized_channels is None or authors is None:
+            raise ValueError("members, channels, uninitialized_channels, and authors are required.")
 
         member_mentions_type: type[MemberMention] = MemberMention
         channel_mentions_type: type[ChannelMention] = ChannelMention
 
-        timestamp = data["timestamp"]
-        if isinstance(timestamp, int):
-            self._timestamp = timestamp
+        timestamp_value = data.get("timestamp")
+        if isinstance(timestamp_value, int):
+            self._timestamp = timestamp_value
+        elif isinstance(timestamp_value, float):
+            self._timestamp = int(timestamp_value)
+        elif isinstance(timestamp_value, str):
+            self._timestamp = parse(timestamp_value) if not timestamp_value.isnumeric() else int(timestamp_value)
+        elif timestamp_value is None:
+            raise ValueError("message timestamp is required.")
         else:
-            self._timestamp = parse(timestamp) if not timestamp.isnumeric() else int(timestamp)
+            timestamp_text = str(timestamp_value)
+            self._timestamp = parse(timestamp_text) if not timestamp_text.isnumeric() else int(timestamp_text)
 
-        try:
-            self._conversation = data["conversation"]
-        except KeyError:
-            self._conversation = None
+        self._conversation = coerce_optional_str(data.get("conversation"))
 
-        member = members[data["authorId"]]
-        self._original_text = data["content"]
-        message_text = data["content"]
+        author_id = coerce_str(data.get("authorId"), field="authorId")
+        member = members[author_id]
+        message_text = coerce_str(data.get("content"), field="content")
+        self._original_text = message_text
         self._processable_text = message_text
 
         if platform == "slack":
             member_mentions_type = SlackMemberMention
             channel_mentions_type = SlackChannelMention
 
-        try:
-            attachments = data["attachments"]
-        except KeyError:
-            attachments = []
+        attachments_list: list[JSONDict] = []
+        attachments_value = data.get("attachments")
+        if isinstance(attachments_value, list):
+            for attachment in attachments_value:
+                if isinstance(attachment, dict):
+                    attachments_list.append(require_obj(attachment))
 
         if isinstance(member, Author):
             member.messages.append(self)
@@ -274,13 +284,15 @@ class Message(Entity):
             author.messages = [self]
             author.community = member.community
 
-            members[data["authorId"]] = author
+            members[author_id] = author
+        else:
+            raise TypeError("Unexpected member type in members map.")
 
         self._author = author
-        authors[data["authorId"]] = author
+        authors[author_id] = author
 
         # Retrieve attachments, code blocks, multimedia links, links, member mentions, and channel mentions
-        self._attachments = Attachment.retrieve_attachments(attachments, self)
+        self._attachments = Attachment.retrieve_attachments(attachments_list, self)
 
         code_blocks, self._processable_text = Code.retrieve(self._processable_text, self)
         multimedia_links, self._processable_text = Multimedia.retrieve(self._processable_text, self)
@@ -314,10 +326,10 @@ class Message(Entity):
 
         return self
 
-    def get_member_mentions(self):
+    def get_member_mentions(self) -> list[str]:
         return [mention.member.uuid for mention in self.contents if isinstance(mention, MemberMention)]
 
-    def get_member_mentions_union(self, message2, authors: bool = False):
+    def get_member_mentions_union(self, message2: Message, authors: bool = False) -> set[str]:
         """
         Get the union of member mentions in the message, or the union of the authors and mentions.
 
@@ -333,7 +345,7 @@ class Message(Entity):
 
         return authors_set & mentions if authors else set(message1_mentions) & set(message2_mentions)
 
-    def open_in_browser(self):
+    def open_in_browser(self) -> None:
         """
         Open the current message in the browser.
         """

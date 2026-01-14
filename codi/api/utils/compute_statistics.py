@@ -1,7 +1,6 @@
-from typing import MutableMapping, Sequence
+from collections.abc import MutableMapping, Sequence
 
 import tqdm
-
 from sklearn.metrics import precision_recall_fscore_support
 
 Statistics = MutableMapping[str, dict[str, float | None | dict[str, float]]]
@@ -86,7 +85,7 @@ def f_score(
     false1 = 0
     missed1 = 0
 
-    for true, pred_label in zip(labels, prediction):
+    for true, pred_label in zip(labels, prediction, strict=False):
         if true == pred_label:
             right += 1
         if true == 1 and pred_label == 1:

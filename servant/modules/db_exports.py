@@ -12,8 +12,8 @@ from pathlib import Path
 import discord
 
 from servant.defs import GlobalContext, ToolDef
-from typed_json import JSON, JSONDict, obj_to_json
 from servant.modules import commitment, topic_subscriptions
+from typed_json import JSON, JSONDict, obj_to_json
 
 _LOGGER = logging.getLogger(__name__)
 

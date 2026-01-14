@@ -6,13 +6,14 @@ import json
 import logging
 import sqlite3
 import time
+from collections.abc import AsyncIterable, Callable, Iterable, Sequence
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Sequence, Set, Tuple, TypeVar
+from typing import TypeVar
 
 import discord
 from discord.http import Route
 
-from servant.defs import RoutineTask, GlobalContext, ToolDef
+from servant.defs import GlobalContext, RoutineTask, ToolDef
 from typed_json import JSON, JSONDict, coerce_int, coerce_snowflake, coerce_str
 
 _LOGGER = logging.getLogger(__name__)
@@ -639,7 +640,7 @@ def _now_ms() -> int:
     return int(dt.datetime.now(dt.timezone.utc).timestamp() * 1000)
 
 
-def _to_epoch_ms(ts: Optional[dt.datetime]) -> Optional[int]:
+def _to_epoch_ms(ts: dt.datetime | None) -> int | None:
     if ts is None:
         return None
     if ts.tzinfo is None:
@@ -649,7 +650,7 @@ def _to_epoch_ms(ts: Optional[dt.datetime]) -> Optional[int]:
     return int(ts.timestamp() * 1000)
 
 
-def _parse_epoch_ms(value: object | None) -> Optional[int]:
+def _parse_epoch_ms(value: object | None) -> int | None:
     if value is None:
         return None
     if isinstance(value, int):
@@ -682,7 +683,7 @@ def _parse_epoch_ms(value: object | None) -> Optional[int]:
     return None
 
 
-def _snowflake_timestamp_ms(value: object | None) -> Optional[int]:
+def _snowflake_timestamp_ms(value: object | None) -> int | None:
     if value is None:
         return None
     try:
@@ -701,11 +702,11 @@ def _snowflake_from_epoch_ms(value: int, *, high: bool = False) -> int:
     return base
 
 
-def _message_timestamp_ms(conn: sqlite3.Connection, *, channel_id: str, message_id: Optional[str]) -> Optional[int]:
+def _message_timestamp_ms(conn: sqlite3.Connection, *, channel_id: str, message_id: str | None) -> int | None:
     if message_id is None:
         return None
     message_id_str = str(message_id)
-    row: Optional[sqlite3.Row] = conn.execute(
+    row: sqlite3.Row | None = conn.execute(
         """
         SELECT created_at
         FROM messages
@@ -720,8 +721,8 @@ def _message_timestamp_ms(conn: sqlite3.Connection, *, channel_id: str, message_
     return _snowflake_timestamp_ms(message_id_str)
 
 
-def _channel_indexed_timestamp_range(conn: sqlite3.Connection, channel_id: str) -> Optional[Tuple[int, int]]:
-    row: Optional[sqlite3.Row] = conn.execute(
+def _channel_indexed_timestamp_range(conn: sqlite3.Connection, channel_id: str) -> tuple[int, int] | None:
+    row: sqlite3.Row | None = conn.execute(
         """
         SELECT last_before_id, latest_seen_id
         FROM channel_state
@@ -750,9 +751,7 @@ def _channel_indexed_timestamp_range(conn: sqlite3.Connection, channel_id: str) 
     return (start_ts, end_ts)
 
 
-async def get_channel_indexed_timestamp_range(
-    ctx: GlobalContext, channel_id: Optional[str]
-) -> Optional[Tuple[int, int]]:
+async def get_channel_indexed_timestamp_range(ctx: GlobalContext, channel_id: str | None) -> tuple[int, int] | None:
     """Return (start_ms, end_ms) for the contiguous indexed window, or None."""
     if channel_id is None:
         raise ValueError("channel_id is required.")
@@ -765,7 +764,7 @@ async def get_channel_indexed_timestamp_range(
     )
 
 
-def _bool_int_or_none(value: Optional[bool]) -> Optional[int]:
+def _bool_int_or_none(value: bool | None) -> int | None:
     if value is None:
         return None
     return int(bool(value))
@@ -778,14 +777,14 @@ def _get_int_config(ctx: GlobalContext, key: str, default: int) -> int:
     return coerce_int(raw, default)
 
 
-def _guild_row(guild: discord.Guild, now: int) -> Tuple[
+def _guild_row(guild: discord.Guild, now: int) -> tuple[
     str,
     str,
-    Optional[str],
-    Optional[int],
-    Optional[str],
-    Optional[str],
-    Optional[int],
+    str | None,
+    int | None,
+    str | None,
+    str | None,
+    int | None,
     int,
 ]:
     icon_url = None
@@ -807,19 +806,19 @@ def _guild_row(guild: discord.Guild, now: int) -> Tuple[
     )
 
 
-def _channel_row(channel: discord.abc.GuildChannel | discord.Thread, guild_id: int, now: int) -> Tuple[
+def _channel_row(channel: discord.abc.GuildChannel | discord.Thread, guild_id: int, now: int) -> tuple[
     str,
     str,
     str,
     str,
-    Optional[int],
-    Optional[str],
-    Optional[str],
-    Optional[int],
-    Optional[int],
-    Optional[int],
+    int | None,
+    str | None,
+    str | None,
+    int | None,
+    int | None,
+    int | None,
     int,
-    Optional[str],
+    str | None,
 ]:
     type_name = getattr(getattr(channel, "type", None), "name", None)
     if not type_name:
@@ -869,15 +868,15 @@ def _channel_row(channel: discord.abc.GuildChannel | discord.Thread, guild_id: i
     )
 
 
-def _user_row(user: discord.abc.User, now: int) -> Tuple[
+def _user_row(user: discord.abc.User, now: int) -> tuple[
     str,
     str,
     str,
-    Optional[str],
+    str | None,
     int,
     int,
-    Optional[str],
-    Optional[int],
+    str | None,
+    int | None,
     int,
 ]:
     avatar_url = None
@@ -899,19 +898,9 @@ def _user_row(user: discord.abc.User, now: int) -> Tuple[
     )
 
 
-def _user_row_from_payload(payload: JSON, now: int) -> Optional[
-    Tuple[
-        str,
-        str,
-        str,
-        Optional[str],
-        int,
-        int,
-        Optional[str],
-        Optional[int],
-        int,
-    ]
-]:
+def _user_row_from_payload(
+    payload: JSON, now: int
+) -> tuple[str, str, str, str | None, int, int, str | None, int | None, int] | None:
     if not isinstance(payload, dict):
         return None
     user_id = payload.get("id")
@@ -945,20 +934,20 @@ def _user_row_from_payload(payload: JSON, now: int) -> Optional[
     )
 
 
-def _role_row(role: discord.Role, now: int) -> Tuple[
+def _role_row(role: discord.Role, now: int) -> tuple[
     str,
     str,
     str,
     int,
     int,
     int,
-    Optional[str],
+    str | None,
     int,
     int,
-    Optional[str],
-    Optional[str],
+    str | None,
+    str | None,
     int,
-    Optional[int],
+    int | None,
 ]:
     icon_url = None
     role_icon = getattr(role, "icon", None)
@@ -968,7 +957,7 @@ def _role_row(role: discord.Role, now: int) -> Tuple[
         except Exception:
             icon_url = None
     permissions = getattr(role, "permissions", None)
-    permissions_value: Optional[str] = None
+    permissions_value: str | None = None
     if permissions is not None:
         permissions_value = str(getattr(permissions, "value", permissions))
     return (
@@ -988,7 +977,7 @@ def _role_row(role: discord.Role, now: int) -> Tuple[
     )
 
 
-def _emoji_row(emoji: discord.Emoji, guild_id: str, now: int) -> Tuple[
+def _emoji_row(emoji: discord.Emoji, guild_id: str, now: int) -> tuple[
     str,
     str,
     str,
@@ -1010,13 +999,13 @@ def _emoji_row(emoji: discord.Emoji, guild_id: str, now: int) -> Tuple[
     )
 
 
-def _sticker_row(sticker: discord.StickerItem, guild_id: str, now: int) -> Tuple[
+def _sticker_row(sticker: discord.StickerItem, guild_id: str, now: int) -> tuple[
     str,
     str,
     str,
-    Optional[str],
-    Optional[str],
-    Optional[int],
+    str | None,
+    str | None,
+    int | None,
     int,
     int,
 ]:
@@ -1036,7 +1025,7 @@ def _sticker_row(sticker: discord.StickerItem, guild_id: str, now: int) -> Tuple
     )
 
 
-def _emoji_key_from_parts(name: Optional[str], emoji_id: object | None) -> Optional[str]:
+def _emoji_key_from_parts(name: str | None, emoji_id: object | None) -> str | None:
     if emoji_id is not None:
         if isinstance(emoji_id, bool):
             emoji_id = int(emoji_id)
@@ -1060,7 +1049,7 @@ def _emoji_key_from_parts(name: Optional[str], emoji_id: object | None) -> Optio
     return None
 
 
-def _emoji_key(emoji: object) -> Optional[str]:
+def _emoji_key(emoji: object) -> str | None:
     if isinstance(emoji, str):
         return f":{emoji}:"
     emoji_id = getattr(emoji, "id", None)
@@ -1068,8 +1057,8 @@ def _emoji_key(emoji: object) -> Optional[str]:
     return _emoji_key_from_parts(name, emoji_id) or str(emoji)
 
 
-def _reaction_rows(message: discord.Message, now: int) -> List[Tuple[str, str, int, int, int]]:
-    rows: List[Tuple[str, str, int, int, int]] = []
+def _reaction_rows(message: discord.Message, now: int) -> list[tuple[str, str, int, int, int]]:
+    rows: list[tuple[str, str, int, int, int]] = []
     message_id = str(message.id)
     for reaction in getattr(message, "reactions", []) or []:
         emoji_key = _emoji_key(getattr(reaction, "emoji", None))
@@ -1081,8 +1070,8 @@ def _reaction_rows(message: discord.Message, now: int) -> List[Tuple[str, str, i
     return rows
 
 
-def _reaction_rows_from_payload(*, message_id: str, reactions: JSON, now: int) -> List[Tuple[str, str, int, int, int]]:
-    rows: List[Tuple[str, str, int, int, int]] = []
+def _reaction_rows_from_payload(*, message_id: str, reactions: JSON, now: int) -> list[tuple[str, str, int, int, int]]:
+    rows: list[tuple[str, str, int, int, int]] = []
     if not isinstance(reactions, list):
         return rows
     for reaction in reactions:
@@ -1115,19 +1104,19 @@ def _reaction_rows_from_payload(*, message_id: str, reactions: JSON, now: int) -
     return rows
 
 
-def _member_row(member: discord.Member, now: int, left_at: Optional[int] = None) -> Tuple[
+def _member_row(member: discord.Member, now: int, left_at: int | None = None) -> tuple[
     str,
     str,
-    Optional[str],
-    Optional[int],
+    str | None,
+    int | None,
     str,
     int,
-    Optional[int],
+    int | None,
     int,
     int,
-    Optional[str],
-    Optional[int],
-    Optional[int],
+    str | None,
+    int | None,
+    int | None,
     int,
 ]:
     roles = [str(role.id) for role in member.roles]
@@ -1150,15 +1139,15 @@ def _member_row(member: discord.Member, now: int, left_at: Optional[int] = None)
     )
 
 
-def _message_row(message: discord.Message, now: int) -> Tuple[
+def _message_row(message: discord.Message, now: int) -> tuple[
     str,
     str,
-    Optional[str],
+    str | None,
     str,
-    Optional[str],
+    str | None,
     int,
-    Optional[int],
-    Optional[int],
+    int | None,
+    int | None,
     str,
     int,
     int,
@@ -1186,23 +1175,12 @@ def _message_row(message: discord.Message, now: int) -> Tuple[
     )
 
 
-def _message_row_from_payload(payload: JSON, *, channel_id: Optional[str], guild_id: Optional[str]) -> Optional[
-    Tuple[
-        str,
-        Optional[str],
-        Optional[str],
-        Optional[str],
-        Optional[str],
-        int,
-        Optional[int],
-        Optional[int],
-        str,
-        int,
-        int,
-        int,
-        int,
-    ]
-]:
+def _message_row_from_payload(
+    payload: JSON, *, channel_id: str | None, guild_id: str | None
+) -> (
+    tuple[str, str | None, str | None, str | None, str | None, int, int | None, int | None, str, int, int, int, int]
+    | None
+):
     if not isinstance(payload, dict):
         return None
     message_id = payload.get("id")
@@ -1251,9 +1229,9 @@ def _message_row_from_payload(payload: JSON, *, channel_id: Optional[str], guild
     )
 
 
-def _dedupe_ids(values: Sequence[object]) -> List[str]:
-    seen: Set[str] = set()
-    result: List[str] = []
+def _dedupe_ids(values: Sequence[object]) -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
     for value in values:
         if value is None:
             continue
@@ -1265,51 +1243,52 @@ def _dedupe_ids(values: Sequence[object]) -> List[str]:
     return result
 
 
-def _id_rows(message_id: str, values: Sequence[object]) -> List[Tuple[str, str]]:
+def _id_rows(message_id: str, values: Sequence[object]) -> list[tuple[str, str]]:
     return [(message_id, value) for value in _dedupe_ids(values)]
 
 
-def _extract_ids_from_payload(values: object) -> List[str]:
+def _extract_ids_from_payload(values: object) -> list[str]:
     if not isinstance(values, list):
         return []
-    extracted: List[object] = []
+    extracted: list[object] = []
     for value in values:
         if isinstance(value, dict):
             value = value.get("id")
         elif hasattr(value, "id"):
-            value = getattr(value, "id")
+            value = value.id
         if value is None:
             continue
         extracted.append(value)
     return _dedupe_ids(extracted)
 
 
-def _user_mention_rows(message: discord.Message) -> List[Tuple[str, str]]:
+def _user_mention_rows(message: discord.Message) -> list[tuple[str, str]]:
     return _id_rows(str(message.id), [user.id for user in message.mentions])
 
 
-def _role_mention_rows(message: discord.Message) -> List[Tuple[str, str]]:
+def _role_mention_rows(message: discord.Message) -> list[tuple[str, str]]:
     return _id_rows(str(message.id), [role.id for role in message.role_mentions])
 
 
-def _channel_mention_rows(message: discord.Message) -> List[Tuple[str, str]]:
+def _channel_mention_rows(message: discord.Message) -> list[tuple[str, str]]:
     return _id_rows(str(message.id), [channel.id for channel in message.channel_mentions])
 
 
 def _embed_json(embed: object) -> str:
     payload: object
-    if hasattr(embed, "to_dict"):
-        payload = embed.to_dict()
+    to_dict = getattr(embed, "to_dict", None)
+    if callable(to_dict):
+        payload = to_dict()
     else:
         payload = embed
     return json.dumps(payload, ensure_ascii=True, default=str)
 
 
-def _attachment_rows(message: discord.Message, now: int) -> List[RowTuple]:
+def _attachment_rows(message: discord.Message, now: int) -> list[RowTuple]:
     guild_id = str(message.guild.id) if message.guild else None
     channel_id = str(message.channel.id)
     message_id = str(message.id)
-    rows: List[RowTuple] = []
+    rows: list[RowTuple] = []
     for attachment in message.attachments:
         attachment_id = getattr(attachment, "id", None)
         url = getattr(attachment, "url", None)
@@ -1340,14 +1319,14 @@ def _attachment_rows(message: discord.Message, now: int) -> List[RowTuple]:
 def _attachment_rows_from_payload(
     *,
     message_id: str,
-    channel_id: Optional[str],
-    guild_id: Optional[str],
+    channel_id: str | None,
+    guild_id: str | None,
     attachments: Sequence[object],
     now: int,
-) -> List[RowTuple]:
+) -> list[RowTuple]:
     if channel_id is None:
         return []
-    rows: List[RowTuple] = []
+    rows: list[RowTuple] = []
     for attachment in attachments:
         if not isinstance(attachment, dict):
             continue
@@ -1418,9 +1397,9 @@ def _attachment_rows_from_payload(
     return rows
 
 
-def _embed_rows(message: discord.Message, now: int) -> List[RowTuple]:
+def _embed_rows(message: discord.Message, now: int) -> list[RowTuple]:
     message_id = str(message.id)
-    rows: List[RowTuple] = []
+    rows: list[RowTuple] = []
     for idx, embed in enumerate(message.embeds):
         rows.append((message_id, idx, _embed_json(embed), now))
     return rows
@@ -1431,8 +1410,8 @@ def _embed_rows_from_payload(
     message_id: str,
     embeds: Sequence[object],
     now: int,
-) -> List[RowTuple]:
-    rows: List[RowTuple] = []
+) -> list[RowTuple]:
+    rows: list[RowTuple] = []
     for idx, embed in enumerate(embeds):
         rows.append((message_id, idx, _embed_json(embed), now))
     return rows
@@ -1456,7 +1435,7 @@ def _can_read_channel(channel: object) -> bool:
     return bool(getattr(perms, "view_channel", True)) and bool(getattr(perms, "read_message_history", True))
 
 
-def _upsert_guilds(conn: sqlite3.Connection, rows: List[RowTuple]) -> None:
+def _upsert_guilds(conn: sqlite3.Connection, rows: list[RowTuple]) -> None:
     if not rows:
         return
     conn.executemany(
@@ -1478,7 +1457,7 @@ def _upsert_guilds(conn: sqlite3.Connection, rows: List[RowTuple]) -> None:
     )
 
 
-def _upsert_channels(conn: sqlite3.Connection, rows: List[RowTuple]) -> None:
+def _upsert_channels(conn: sqlite3.Connection, rows: list[RowTuple]) -> None:
     if not rows:
         return
     conn.executemany(
@@ -1504,7 +1483,7 @@ def _upsert_channels(conn: sqlite3.Connection, rows: List[RowTuple]) -> None:
     )
 
 
-def _upsert_roles(conn: sqlite3.Connection, rows: List[RowTuple]) -> None:
+def _upsert_roles(conn: sqlite3.Connection, rows: list[RowTuple]) -> None:
     if not rows:
         return
     conn.executemany(
@@ -1531,7 +1510,7 @@ def _upsert_roles(conn: sqlite3.Connection, rows: List[RowTuple]) -> None:
     )
 
 
-def _mark_role_deleted(conn: sqlite3.Connection, *, role_id: str, guild_id: Optional[str], deleted_at: int) -> None:
+def _mark_role_deleted(conn: sqlite3.Connection, *, role_id: str, guild_id: str | None, deleted_at: int) -> None:
     conn.execute(
         """
         INSERT INTO roles
@@ -1547,7 +1526,7 @@ def _mark_role_deleted(conn: sqlite3.Connection, *, role_id: str, guild_id: Opti
     )
 
 
-def _upsert_guild_emojis(conn: sqlite3.Connection, rows: List[RowTuple]) -> None:
+def _upsert_guild_emojis(conn: sqlite3.Connection, rows: list[RowTuple]) -> None:
     if not rows:
         return
     conn.executemany(
@@ -1573,8 +1552,8 @@ def _replace_guild_emojis(
     conn: sqlite3.Connection,
     *,
     guild_id: str,
-    rows: List[RowTuple],
-    emoji_ids: List[str],
+    rows: list[RowTuple],
+    emoji_ids: list[str],
 ) -> None:
     _upsert_guild_emojis(conn, rows)
     if not emoji_ids:
@@ -1594,7 +1573,7 @@ def _replace_guild_emojis(
     )
 
 
-def _upsert_guild_stickers(conn: sqlite3.Connection, rows: List[RowTuple]) -> None:
+def _upsert_guild_stickers(conn: sqlite3.Connection, rows: list[RowTuple]) -> None:
     if not rows:
         return
     conn.executemany(
@@ -1620,8 +1599,8 @@ def _replace_guild_stickers(
     conn: sqlite3.Connection,
     *,
     guild_id: str,
-    rows: List[RowTuple],
-    sticker_ids: List[str],
+    rows: list[RowTuple],
+    sticker_ids: list[str],
 ) -> None:
     _upsert_guild_stickers(conn, rows)
     if not sticker_ids:
@@ -1641,7 +1620,7 @@ def _replace_guild_stickers(
     )
 
 
-def _upsert_users(conn: sqlite3.Connection, rows: List[RowTuple]) -> None:
+def _upsert_users(conn: sqlite3.Connection, rows: list[RowTuple]) -> None:
     if not rows:
         return
     conn.executemany(
@@ -1664,7 +1643,7 @@ def _upsert_users(conn: sqlite3.Connection, rows: List[RowTuple]) -> None:
     )
 
 
-def _upsert_members(conn: sqlite3.Connection, rows: List[RowTuple]) -> None:
+def _upsert_members(conn: sqlite3.Connection, rows: list[RowTuple]) -> None:
     if not rows:
         return
     conn.executemany(
@@ -1693,7 +1672,7 @@ def _upsert_members(conn: sqlite3.Connection, rows: List[RowTuple]) -> None:
         "DELETE FROM guild_member_roles WHERE guild_id = ? AND user_id = ?",
         member_id_rows,
     )
-    role_rows: List[Tuple[str, str, str]] = []
+    role_rows: list[tuple[str, str, str]] = []
     for row in rows:
         guild_id = str(row[0])
         user_id = str(row[1])
@@ -1706,7 +1685,7 @@ def _upsert_members(conn: sqlite3.Connection, rows: List[RowTuple]) -> None:
             continue
         if not isinstance(roles, list):
             continue
-        seen_roles: Set[str] = set()
+        seen_roles: set[str] = set()
         for role_id in roles:
             if role_id is None:
                 continue
@@ -1762,8 +1741,8 @@ def _upsert_message_fields(
     conn: sqlite3.Connection,
     *,
     message_id: str,
-    channel_id: Optional[str],
-    guild_id: Optional[str],
+    channel_id: str | None,
+    guild_id: str | None,
     fields: JSONDict,
 ) -> None:
     if not fields:
@@ -1771,7 +1750,7 @@ def _upsert_message_fields(
     field_names = list(fields.keys())
     columns = ["message_id", "channel_id", "guild_id", *field_names]
     placeholders = ", ".join("?" for _ in columns)
-    update_parts: List[str] = []
+    update_parts: list[str] = []
     if channel_id is not None:
         update_parts.append("channel_id = excluded.channel_id")
     if guild_id is not None:
@@ -1795,8 +1774,8 @@ def _mark_message_deleted(
     conn: sqlite3.Connection,
     *,
     message_id: str,
-    channel_id: Optional[str],
-    guild_id: Optional[str],
+    channel_id: str | None,
+    guild_id: str | None,
     deleted_at: int,
 ) -> None:
     conn.execute(
@@ -1818,8 +1797,8 @@ def _ensure_message_row(
     conn: sqlite3.Connection,
     *,
     message_id: str,
-    channel_id: Optional[str],
-    guild_id: Optional[str],
+    channel_id: str | None,
+    guild_id: str | None,
 ) -> None:
     conn.execute(
         """
@@ -1835,7 +1814,7 @@ def _ensure_message_row(
     )
 
 
-def _update_channel_pins(conn: sqlite3.Connection, *, channel_id: str, pinned_ids: List[str]) -> None:
+def _update_channel_pins(conn: sqlite3.Connection, *, channel_id: str, pinned_ids: list[str]) -> None:
     if pinned_ids:
         placeholders = ", ".join("?" for _ in pinned_ids)
         conn.execute(
@@ -1860,7 +1839,7 @@ def _update_channel_pins(conn: sqlite3.Connection, *, channel_id: str, pinned_id
         )
 
 
-def _ensure_channel_state(conn: sqlite3.Connection, rows: List[Tuple[str, str, int]]) -> None:
+def _ensure_channel_state(conn: sqlite3.Connection, rows: list[tuple[str, str, int]]) -> None:
     if not rows:
         return
     conn.executemany(
@@ -1877,7 +1856,7 @@ def _ensure_channel_state(conn: sqlite3.Connection, rows: List[Tuple[str, str, i
     )
 
 
-def _ensure_thread_parent_state(conn: sqlite3.Connection, rows: List[Tuple[str, str, int]]) -> None:
+def _ensure_thread_parent_state(conn: sqlite3.Connection, rows: list[tuple[str, str, int]]) -> None:
     if not rows:
         return
     conn.executemany(
@@ -1894,7 +1873,7 @@ def _ensure_thread_parent_state(conn: sqlite3.Connection, rows: List[Tuple[str, 
     )
 
 
-def _ensure_guild_state(conn: sqlite3.Connection, rows: List[Tuple[str, int]]) -> None:
+def _ensure_guild_state(conn: sqlite3.Connection, rows: list[tuple[str, int]]) -> None:
     if not rows:
         return
     conn.executemany(
@@ -1910,8 +1889,8 @@ def _ensure_guild_state(conn: sqlite3.Connection, rows: List[Tuple[str, int]]) -
     )
 
 
-def _pick_channel_state_backfill(conn: sqlite3.Connection, now: int) -> Optional[sqlite3.Row]:
-    row: Optional[sqlite3.Row] = conn.execute(
+def _pick_channel_state_backfill(conn: sqlite3.Connection, now: int) -> sqlite3.Row | None:
+    row: sqlite3.Row | None = conn.execute(
         """
         SELECT channel_id, guild_id, last_before_id, latest_seen_id, backfill_done, fetch_error_count
         FROM channel_state
@@ -1926,8 +1905,8 @@ def _pick_channel_state_backfill(conn: sqlite3.Connection, now: int) -> Optional
     return row
 
 
-def _pick_channel_state_tail(conn: sqlite3.Connection, now: int) -> Optional[sqlite3.Row]:
-    row: Optional[sqlite3.Row] = conn.execute(
+def _pick_channel_state_tail(conn: sqlite3.Connection, now: int) -> sqlite3.Row | None:
+    row: sqlite3.Row | None = conn.execute(
         """
         SELECT channel_id, guild_id, last_before_id, latest_seen_id, backfill_done, fetch_error_count
         FROM channel_state
@@ -1942,8 +1921,8 @@ def _pick_channel_state_tail(conn: sqlite3.Connection, now: int) -> Optional[sql
     return row
 
 
-def _pick_channel_state_search(conn: sqlite3.Connection, now: int) -> Optional[sqlite3.Row]:
-    row: Optional[sqlite3.Row] = conn.execute(
+def _pick_channel_state_search(conn: sqlite3.Connection, now: int) -> sqlite3.Row | None:
+    row: sqlite3.Row | None = conn.execute(
         """
         SELECT channel_id, guild_id, last_before_id, latest_seen_id, backfill_done, search_before_id, search_done, fetch_error_count, search_forbidden_count
         FROM channel_state
@@ -1959,8 +1938,8 @@ def _pick_channel_state_search(conn: sqlite3.Connection, now: int) -> Optional[s
     return row
 
 
-def _pick_channel_state_pins(conn: sqlite3.Connection, now: int, check_before: int) -> Optional[sqlite3.Row]:
-    row: Optional[sqlite3.Row] = conn.execute(
+def _pick_channel_state_pins(conn: sqlite3.Connection, now: int, check_before: int) -> sqlite3.Row | None:
+    row: sqlite3.Row | None = conn.execute(
         """
         SELECT channel_id, guild_id
         FROM channel_state
@@ -1975,8 +1954,8 @@ def _pick_channel_state_pins(conn: sqlite3.Connection, now: int, check_before: i
     return row
 
 
-def _pick_guild_state(conn: sqlite3.Connection, rescan_cutoff: Optional[int]) -> Optional[sqlite3.Row]:
-    row: Optional[sqlite3.Row]
+def _pick_guild_state(conn: sqlite3.Connection, rescan_cutoff: int | None) -> sqlite3.Row | None:
+    row: sqlite3.Row | None
     if rescan_cutoff is None:
         row = conn.execute(
             """
@@ -2003,8 +1982,8 @@ def _pick_guild_state(conn: sqlite3.Connection, rescan_cutoff: Optional[int]) ->
     return row
 
 
-def _pick_thread_parent_state(conn: sqlite3.Connection) -> Optional[sqlite3.Row]:
-    row: Optional[sqlite3.Row] = conn.execute(
+def _pick_thread_parent_state(conn: sqlite3.Connection) -> sqlite3.Row | None:
+    row: sqlite3.Row | None = conn.execute(
         """
         SELECT parent_channel_id, guild_id,
                public_before_ts, private_before_ts,
@@ -2023,8 +2002,8 @@ def _update_channel_state(
     conn: sqlite3.Connection,
     *,
     channel_id: str,
-    last_before_id: Optional[str],
-    latest_seen_id: Optional[str],
+    last_before_id: str | None,
+    latest_seen_id: str | None,
     backfill_done: int,
     last_indexed_at: int,
     updated_at: int,
@@ -2056,7 +2035,7 @@ def _bump_channel_latest_seen(
     conn: sqlite3.Connection,
     *,
     channel_id: str,
-    guild_id: Optional[str],
+    guild_id: str | None,
     message_id: str,
     now: int,
 ) -> None:
@@ -2083,7 +2062,7 @@ def _update_channel_state_search(
     conn: sqlite3.Connection,
     *,
     channel_id: str,
-    search_before_id: Optional[str],
+    search_before_id: str | None,
     search_done: int,
     search_last_indexed_at: int,
     updated_at: int,
@@ -2131,12 +2110,12 @@ def _update_guild_state(
     conn: sqlite3.Connection,
     *,
     guild_id: str,
-    member_after_id: Optional[str],
-    member_latest_id: Optional[str],
+    member_after_id: str | None,
+    member_latest_id: str | None,
     backfill_done: int,
     last_indexed_at: int,
     updated_at: int,
-    scan_completed_at: Optional[int],
+    scan_completed_at: int | None,
 ) -> None:
     conn.execute(
         """
@@ -2195,8 +2174,8 @@ def _update_thread_parent_state(
     conn: sqlite3.Connection,
     *,
     parent_channel_id: str,
-    public_before_ts: Optional[int],
-    private_before_ts: Optional[int],
+    public_before_ts: int | None,
+    private_before_ts: int | None,
     public_done: int,
     private_done: int,
     updated_at: int,
@@ -2245,8 +2224,8 @@ def _record_channel_state_error(
     conn: sqlite3.Connection,
     *,
     channel_id: str,
-    last_before_id: Optional[str],
-    latest_seen_id: Optional[str],
+    last_before_id: str | None,
+    latest_seen_id: str | None,
     backfill_done: int,
     last_indexed_at: int,
     updated_at: int,
@@ -2280,8 +2259,8 @@ def _disable_channel_state(
     conn: sqlite3.Connection,
     *,
     channel_id: str,
-    last_before_id: Optional[str],
-    latest_seen_id: Optional[str],
+    last_before_id: str | None,
+    latest_seen_id: str | None,
     backfill_done: int,
     last_indexed_at: int,
     updated_at: int,
@@ -2321,8 +2300,8 @@ def _record_channel_fetch_backoff(
     conn: sqlite3.Connection,
     *,
     channel_id: str,
-    last_before_id: Optional[str],
-    latest_seen_id: Optional[str],
+    last_before_id: str | None,
+    latest_seen_id: str | None,
     backfill_done: int,
     last_indexed_at: int,
     updated_at: int,
@@ -2362,7 +2341,7 @@ def _record_channel_search_backoff(
     conn: sqlite3.Connection,
     *,
     channel_id: str,
-    search_before_id: Optional[str],
+    search_before_id: str | None,
     search_done: int,
     search_last_indexed_at: int,
     updated_at: int,
@@ -2400,7 +2379,7 @@ def _record_channel_state_search_error(
     conn: sqlite3.Connection,
     *,
     channel_id: str,
-    search_before_id: Optional[str],
+    search_before_id: str | None,
     search_done: int,
     search_last_indexed_at: int,
     updated_at: int,
@@ -2434,7 +2413,7 @@ def _record_channel_thread_fetch_error(
     channel_id: str,
     error: str,
     error_at: int,
-    forbidden_until: Optional[int],
+    forbidden_until: int | None,
 ) -> None:
     conn.execute(
         """
@@ -2453,8 +2432,8 @@ def _record_guild_state_error(
     conn: sqlite3.Connection,
     *,
     guild_id: str,
-    member_after_id: Optional[str],
-    member_latest_id: Optional[str],
+    member_after_id: str | None,
+    member_latest_id: str | None,
     backfill_done: int,
     last_indexed_at: int,
     updated_at: int,
@@ -2484,12 +2463,12 @@ def _record_guild_state_error(
     )
 
 
-async def _load_channel_thread_backoff(ctx: GlobalContext, channel_ids: List[str]) -> Dict[str, Optional[int]]:
+async def _load_channel_thread_backoff(ctx: GlobalContext, channel_ids: list[str]) -> dict[str, int | None]:
     if not channel_ids:
         return {}
     unique_ids = list(dict.fromkeys(channel_ids))
 
-    def _read(conn: sqlite3.Connection) -> Dict[str, Optional[int]]:
+    def _read(conn: sqlite3.Connection) -> dict[str, int | None]:
         placeholders = ", ".join("?" for _ in unique_ids)
         rows = conn.execute(
             f"""
@@ -2499,7 +2478,7 @@ async def _load_channel_thread_backoff(ctx: GlobalContext, channel_ids: List[str
             """,
             unique_ids,
         ).fetchall()
-        results: Dict[str, Optional[int]] = {}
+        results: dict[str, int | None] = {}
         for row in rows:
             channel_id = str(row["channel_id"])
             raw_until = row["archived_threads_forbidden_until"]
@@ -2509,7 +2488,7 @@ async def _load_channel_thread_backoff(ctx: GlobalContext, channel_ids: List[str
     return await _with_db(ctx, _read)
 
 
-def _archived_threads_backoff_active(forbidden_until: Optional[int], now_ms: int) -> bool:
+def _archived_threads_backoff_active(forbidden_until: int | None, now_ms: int) -> bool:
     until = _parse_epoch_ms(forbidden_until)
     return until is not None and until > now_ms
 
@@ -2523,26 +2502,26 @@ def _fetch_backoff_ms(error_count: int) -> int:
     return int(backoff_seconds * 1000)
 
 
-def _fetch_backoff_active(forbidden_until: Optional[int], now_ms: int) -> bool:
+def _fetch_backoff_active(forbidden_until: int | None, now_ms: int) -> bool:
     until = _parse_epoch_ms(forbidden_until)
     return until is not None and until > now_ms
 
 
-async def _sync_guilds_and_channels(ctx: GlobalContext, guilds: List[discord.Guild]) -> None:
+async def _sync_guilds_and_channels(ctx: GlobalContext, guilds: list[discord.Guild]) -> None:
     now = _now_ms()
-    guild_rows: List[RowTuple] = []
-    channel_rows: List[RowTuple] = []
-    channel_state_rows: List[Tuple[str, str, int]] = []
-    guild_state_rows: List[Tuple[str, int]] = []
-    role_rows: List[RowTuple] = []
-    emoji_rows_by_guild: Dict[str, List[RowTuple]] = {}
-    emoji_ids_by_guild: Dict[str, List[str]] = {}
-    sticker_rows_by_guild: Dict[str, List[RowTuple]] = {}
-    sticker_ids_by_guild: Dict[str, List[str]] = {}
-    thread_parent_rows: List[Tuple[str, str, int]] = []
-    seen_channel_ids: Set[str] = set()
+    guild_rows: list[RowTuple] = []
+    channel_rows: list[RowTuple] = []
+    channel_state_rows: list[tuple[str, str, int]] = []
+    guild_state_rows: list[tuple[str, int]] = []
+    role_rows: list[RowTuple] = []
+    emoji_rows_by_guild: dict[str, list[RowTuple]] = {}
+    emoji_ids_by_guild: dict[str, list[str]] = {}
+    sticker_rows_by_guild: dict[str, list[RowTuple]] = {}
+    sticker_ids_by_guild: dict[str, list[str]] = {}
+    thread_parent_rows: list[tuple[str, str, int]] = []
+    seen_channel_ids: set[str] = set()
 
-    async def _fetch_active_threads(guild: discord.Guild) -> List[discord.Thread]:
+    async def _fetch_active_threads(guild: discord.Guild) -> list[discord.Thread]:
         for name in ("fetch_active_threads", "active_threads", "get_active_threads"):
             candidate = getattr(guild, name, None)
             if candidate is None:
@@ -2567,16 +2546,17 @@ async def _sync_guilds_and_channels(ctx: GlobalContext, guilds: List[discord.Gui
                 threads = result
             if threads is None:
                 return []
-            if hasattr(threads, "__aiter__"):
-                items: List[discord.Thread] = []
+            if isinstance(threads, AsyncIterable):
+                items: list[discord.Thread] = []
                 async for thread in threads:
                     if isinstance(thread, discord.Thread):
                         items.append(thread)
                 return items
-            try:
-                return [t for t in list(threads) if isinstance(t, discord.Thread)]
-            except TypeError:
-                return [threads] if isinstance(threads, discord.Thread) else []
+            if isinstance(threads, Iterable):
+                return [t for t in threads if isinstance(t, discord.Thread)]
+            if isinstance(threads, discord.Thread):
+                return [threads]
+            return []
         return []
 
     def _add_channel(channel: discord.abc.GuildChannel | discord.Thread, guild_id: int) -> None:
@@ -2594,8 +2574,8 @@ async def _sync_guilds_and_channels(ctx: GlobalContext, guilds: List[discord.Gui
         guild_state_rows.append((str(guild.id), now))
         for role in getattr(guild, "roles", []) or []:
             role_rows.append(_role_row(role, now))
-        emoji_rows: List[RowTuple] = []
-        emoji_ids: List[str] = []
+        emoji_rows: list[RowTuple] = []
+        emoji_ids: list[str] = []
         for emoji in getattr(guild, "emojis", []) or []:
             emoji_id = getattr(emoji, "id", None)
             if emoji_id is None:
@@ -2604,8 +2584,8 @@ async def _sync_guilds_and_channels(ctx: GlobalContext, guilds: List[discord.Gui
             emoji_ids.append(str(emoji_id))
         emoji_rows_by_guild[str(guild.id)] = emoji_rows
         emoji_ids_by_guild[str(guild.id)] = emoji_ids
-        sticker_rows: List[RowTuple] = []
-        sticker_ids: List[str] = []
+        sticker_rows: list[RowTuple] = []
+        sticker_ids: list[str] = []
         for sticker in getattr(guild, "stickers", []) or []:
             sticker_id = getattr(sticker, "id", None)
             if sticker_id is None:
@@ -2658,7 +2638,7 @@ async def _sync_guilds_and_channels(ctx: GlobalContext, guilds: List[discord.Gui
     await _with_db(ctx, _write)
 
 
-def _thread_before_dt(before_ts: Optional[int]) -> Optional[dt.datetime]:
+def _thread_before_dt(before_ts: int | None) -> dt.datetime | None:
     if before_ts is None:
         return None
     try:
@@ -2669,7 +2649,7 @@ def _thread_before_dt(before_ts: Optional[int]) -> Optional[dt.datetime]:
 
 async def _collect_thread_page(
     result: object,
-) -> Tuple[List[discord.Thread], Optional[bool]]:
+) -> tuple[list[discord.Thread], bool | None]:
     if result is None:
         return [], None
     if asyncio.iscoroutine(result):
@@ -2681,18 +2661,17 @@ async def _collect_thread_page(
     else:
         threads = result
         has_more = getattr(result, "has_more", None)
-    if hasattr(threads, "__aiter__"):
-        items: List[discord.Thread] = []
+    if isinstance(threads, AsyncIterable):
+        items: list[discord.Thread] = []
         async for thread in threads:
             if isinstance(thread, discord.Thread):
                 items.append(thread)
         return items, has_more
-    try:
-        return [t for t in list(threads) if isinstance(t, discord.Thread)], has_more
-    except TypeError:
-        if isinstance(threads, discord.Thread):
-            return [threads], has_more
-        return [], has_more
+    if isinstance(threads, Iterable):
+        return [t for t in threads if isinstance(t, discord.Thread)], has_more
+    if isinstance(threads, discord.Thread):
+        return [threads], has_more
+    return [], has_more
 
 
 async def _index_next_thread_parent(ctx: GlobalContext, client: discord.Client, archived_limit: int) -> JSONDict:
@@ -2736,13 +2715,14 @@ async def _index_next_thread_parent(ctx: GlobalContext, client: discord.Client, 
                 parent_channel_id,
                 e,
             )
+            error_msg = str(e)
             await _with_db(
                 ctx,
                 lambda conn: _record_thread_parent_error(
                     conn,
                     parent_channel_id=parent_channel_id,
                     updated_at=_now_ms(),
-                    error=str(e),
+                    error=error_msg,
                 ),
             )
             return {"threads_indexed": 0}
@@ -2811,6 +2791,7 @@ async def _index_next_thread_parent(ctx: GlobalContext, client: discord.Client, 
             parent_channel_id,
             e,
         )
+        error_msg = str(e)
         now = _now_ms()
         forbidden_until = now + (DEFAULT_ARCHIVED_THREADS_FORBIDDEN_BACKOFF_DAYS * 24 * 60 * 60 * 1000)
 
@@ -2818,7 +2799,7 @@ async def _index_next_thread_parent(ctx: GlobalContext, client: discord.Client, 
             _record_channel_thread_fetch_error(
                 conn,
                 channel_id=parent_channel_id,
-                error=str(e),
+                error=error_msg,
                 error_at=now,
                 forbidden_until=forbidden_until,
             )
@@ -2826,7 +2807,7 @@ async def _index_next_thread_parent(ctx: GlobalContext, client: discord.Client, 
                 conn,
                 parent_channel_id=parent_channel_id,
                 updated_at=now,
-                error=str(e),
+                error=error_msg,
             )
             conn.commit()
 
@@ -2838,13 +2819,14 @@ async def _index_next_thread_parent(ctx: GlobalContext, client: discord.Client, 
             parent_channel_id,
             e,
         )
+        error_msg = str(e)
         await _with_db(
             ctx,
             lambda conn: _record_thread_parent_error(
                 conn,
                 parent_channel_id=parent_channel_id,
                 updated_at=_now_ms(),
-                error=str(e),
+                error=error_msg,
             ),
         )
         return {"threads_indexed": 0}
@@ -2869,9 +2851,9 @@ async def _index_next_thread_parent(ctx: GlobalContext, client: discord.Client, 
         )
         return {"threads_indexed": 0}
 
-    thread_rows: List[RowTuple] = []
-    channel_state_rows: List[Tuple[str, str, int]] = []
-    oldest_ts: Optional[int] = None
+    thread_rows: list[RowTuple] = []
+    channel_state_rows: list[tuple[str, str, int]] = []
+    oldest_ts: int | None = None
     for thread in threads:
         thread_rows.append(_channel_row(thread, int(guild_id), now))
         if _is_messageable(thread):
@@ -2922,7 +2904,7 @@ async def _index_next_guild_members(ctx: GlobalContext, client: discord.Client, 
         "indexer_guild_rescan_interval_seconds",
         DEFAULT_GUILD_RESCAN_INTERVAL_SECONDS,
     )
-    rescan_cutoff: Optional[int] = None
+    rescan_cutoff: int | None = None
     if rescan_interval_seconds > 0:
         rescan_cutoff = select_now - (rescan_interval_seconds * 1000)
     state = await _with_db(ctx, lambda conn: _pick_guild_state(conn, rescan_cutoff))
@@ -2987,7 +2969,7 @@ async def _index_next_guild_members(ctx: GlobalContext, client: discord.Client, 
     after: discord.Object | None = None
     if after_id:
         after = discord.Object(id=int(after_id))
-    members: List[discord.Member] = []
+    members: list[discord.Member] = []
     try:
         if after is None:
             async for member in guild.fetch_members(limit=member_batch_size):
@@ -3038,8 +3020,8 @@ async def _index_next_guild_members(ctx: GlobalContext, client: discord.Client, 
         await _with_db(ctx, _write_backfill_done)
         return {"members_indexed": 0}
 
-    users_by_id: Dict[str, RowTuple] = {}
-    member_rows: List[RowTuple] = []
+    users_by_id: dict[str, RowTuple] = {}
+    member_rows: list[RowTuple] = []
     max_member_id = 0
     for member in members:
         user_row = _user_row(member, now)
@@ -3076,7 +3058,7 @@ async def _index_next_channel_messages_from_picker(
     ctx: GlobalContext,
     client: discord.Client,
     message_batch_size: int,
-    pick_state: Callable[[sqlite3.Connection, int], Optional[sqlite3.Row]],
+    pick_state: Callable[[sqlite3.Connection, int], sqlite3.Row | None],
     *,
     fetch_mode: str,
 ) -> JSONDict:
@@ -3163,7 +3145,7 @@ async def _index_next_channel_messages_from_picker(
         await _disable_channel("missing_read_permission", "missing read permission")
         return {"messages_indexed": 0}
 
-    messages: List[discord.Message] = []
+    messages: list[discord.Message] = []
 
     try:
         _LOGGER.info("Fetching messages for channel %s", channel_id)
@@ -3229,15 +3211,15 @@ async def _index_next_channel_messages_from_picker(
         )
         return {"messages_indexed": 0}
 
-    message_rows: List[RowTuple] = []
-    attachment_rows: List[RowTuple] = []
-    embed_rows: List[RowTuple] = []
-    reaction_rows: List[RowTuple] = []
-    user_mention_rows: List[Tuple[str, str]] = []
-    role_mention_rows: List[Tuple[str, str]] = []
-    channel_mention_rows: List[Tuple[str, str]] = []
-    users_by_id: Dict[str, RowTuple] = {}
-    message_ids: List[int] = []
+    message_rows: list[RowTuple] = []
+    attachment_rows: list[RowTuple] = []
+    embed_rows: list[RowTuple] = []
+    reaction_rows: list[RowTuple] = []
+    user_mention_rows: list[tuple[str, str]] = []
+    role_mention_rows: list[tuple[str, str]] = []
+    channel_mention_rows: list[tuple[str, str]] = []
+    users_by_id: dict[str, RowTuple] = {}
+    message_ids: list[int] = []
     for message in messages:
         message_rows.append(_message_row(message, now))
         attachment_rows.extend(_attachment_rows(message, now))
@@ -3742,8 +3724,8 @@ async def record_message_create(ctx: GlobalContext, message: discord.Message) ->
     await _with_db(ctx, _write)
 
 
-def _flatten_search_messages(values: JSON) -> List[JSONDict]:
-    flattened: List[JSONDict] = []
+def _flatten_search_messages(values: JSON) -> list[JSONDict]:
+    flattened: list[JSONDict] = []
     if not isinstance(values, list):
         return flattened
     for item in values:
@@ -3758,24 +3740,24 @@ def _flatten_search_messages(values: JSON) -> List[JSONDict]:
 
 async def _index_message_payloads(
     ctx: GlobalContext,
-    message_payloads: List[JSONDict],
+    message_payloads: list[JSONDict],
     *,
-    channel_id: Optional[str],
-    guild_id: Optional[str],
+    channel_id: str | None,
+    guild_id: str | None,
 ) -> JSONDict:
     if not message_payloads:
         return {"messages_indexed": 0, "min_id": None, "max_id": None}
 
     now = _now_ms()
-    message_rows: List[RowTuple] = []
-    attachment_rows: List[RowTuple] = []
-    embed_rows: List[RowTuple] = []
-    reaction_rows: List[RowTuple] = []
-    user_mention_rows: List[Tuple[str, str]] = []
-    role_mention_rows: List[Tuple[str, str]] = []
-    channel_mention_rows: List[Tuple[str, str]] = []
-    users_by_id: Dict[str, RowTuple] = {}
-    message_ids: List[str] = []
+    message_rows: list[RowTuple] = []
+    attachment_rows: list[RowTuple] = []
+    embed_rows: list[RowTuple] = []
+    reaction_rows: list[RowTuple] = []
+    user_mention_rows: list[tuple[str, str]] = []
+    role_mention_rows: list[tuple[str, str]] = []
+    channel_mention_rows: list[tuple[str, str]] = []
+    users_by_id: dict[str, RowTuple] = {}
+    message_ids: list[str] = []
 
     for payload in message_payloads:
         row = _message_row_from_payload(payload, channel_id=channel_id, guild_id=guild_id)
@@ -3931,7 +3913,7 @@ async def _index_message_payloads(
 
     await _with_db(ctx, _write)
 
-    numeric_ids: List[int] = []
+    numeric_ids: list[int] = []
     for message_id in message_ids:
         try:
             numeric_ids.append(int(message_id))
@@ -3952,17 +3934,17 @@ async def _search_guild_messages(
     client: discord.Client,
     *,
     guild_id: str,
-    channel_id: Optional[str],
-    query: Optional[str],
-    author_id: Optional[str],
-    min_id: Optional[str],
-    max_id: Optional[str],
+    channel_id: str | None,
+    query: str | None,
+    author_id: str | None,
+    min_id: str | None,
+    max_id: str | None,
     offset: int,
     oldest_first: bool,
-    include_nsfw: Optional[bool],
+    include_nsfw: bool | None,
 ) -> JSONDict:
     route = Route("GET", "/guilds/{guild_id}/messages/search", guild_id=guild_id)
-    params: Dict[str, str | int | bool] = {
+    params: dict[str, str | int | bool] = {
         "offset": offset,
         "sort_by": "timestamp",
         "sort_order": "asc" if oldest_first else "desc",
@@ -4056,9 +4038,9 @@ async def index_messages_search(ctx: GlobalContext, obj: JSON) -> JSONDict:
     cursor = offset
     messages_indexed = 0
     messages_fetched = 0
-    total_results: Optional[int] = None
-    min_indexed_id: Optional[int] = None
-    max_indexed_id: Optional[int] = None
+    total_results: int | None = None
+    min_indexed_id: int | None = None
+    max_indexed_id: int | None = None
     done = False
 
     while messages_indexed < max_results:
@@ -4199,11 +4181,11 @@ async def record_message_edit(ctx: GlobalContext, payload: discord.RawMessageUpd
     user_mentions_seen = False
     role_mentions_seen = False
     channel_mentions_seen = False
-    attachment_rows: List[RowTuple] = []
-    embed_rows: List[RowTuple] = []
-    user_mention_rows: List[Tuple[str, str]] = []
-    role_mention_rows: List[Tuple[str, str]] = []
-    channel_mention_rows: List[Tuple[str, str]] = []
+    attachment_rows: list[RowTuple] = []
+    embed_rows: list[RowTuple] = []
+    user_mention_rows: list[tuple[str, str]] = []
+    role_mention_rows: list[tuple[str, str]] = []
+    channel_mention_rows: list[tuple[str, str]] = []
     now = _now_ms()
 
     if "content" in data:
@@ -4380,11 +4362,11 @@ async def record_role_delete(ctx: GlobalContext, role: discord.Role) -> None:
     await _with_db(ctx, _write)
 
 
-async def record_guild_emojis_update(ctx: GlobalContext, guild: discord.Guild, emojis: List[discord.Emoji]) -> None:
+async def record_guild_emojis_update(ctx: GlobalContext, guild: discord.Guild, emojis: list[discord.Emoji]) -> None:
     now = _now_ms()
     guild_id = str(guild.id)
-    rows: List[RowTuple] = []
-    emoji_ids: List[str] = []
+    rows: list[RowTuple] = []
+    emoji_ids: list[str] = []
     for emoji in emojis or []:
         emoji_id = getattr(emoji, "id", None)
         if emoji_id is None:
@@ -4400,12 +4382,12 @@ async def record_guild_emojis_update(ctx: GlobalContext, guild: discord.Guild, e
 
 
 async def record_guild_stickers_update(
-    ctx: GlobalContext, guild: discord.Guild, stickers: List[discord.StickerItem]
+    ctx: GlobalContext, guild: discord.Guild, stickers: list[discord.StickerItem]
 ) -> None:
     now = _now_ms()
     guild_id = str(guild.id)
-    rows: List[RowTuple] = []
-    sticker_ids: List[str] = []
+    rows: list[RowTuple] = []
+    sticker_ids: list[str] = []
     for sticker in stickers or []:
         sticker_id = getattr(sticker, "id", None)
         if sticker_id is None:
@@ -4459,16 +4441,16 @@ async def record_channel_pins_update(ctx: GlobalContext, channel: object) -> Non
         )
         return
 
-    message_rows: List[RowTuple] = []
-    attachment_rows: List[RowTuple] = []
-    embed_rows: List[RowTuple] = []
-    reaction_rows: List[RowTuple] = []
-    user_mention_rows: List[Tuple[str, str]] = []
-    role_mention_rows: List[Tuple[str, str]] = []
-    channel_mention_rows: List[Tuple[str, str]] = []
-    users_by_id: Dict[str, RowTuple] = {}
-    pinned_ids: List[str] = []
-    message_ids: List[str] = []
+    message_rows: list[RowTuple] = []
+    attachment_rows: list[RowTuple] = []
+    embed_rows: list[RowTuple] = []
+    reaction_rows: list[RowTuple] = []
+    user_mention_rows: list[tuple[str, str]] = []
+    role_mention_rows: list[tuple[str, str]] = []
+    channel_mention_rows: list[tuple[str, str]] = []
+    users_by_id: dict[str, RowTuple] = {}
+    pinned_ids: list[str] = []
+    message_ids: list[str] = []
 
     for message in pinned_messages:
         message_rows.append(_message_row(message, now))
@@ -4484,7 +4466,7 @@ async def record_channel_pins_update(ctx: GlobalContext, channel: object) -> Non
         message_ids.append(str(message.id))
 
     message_id_rows = [(message_id,) for message_id in message_ids]
-    max_pinned_id: Optional[str] = None
+    max_pinned_id: str | None = None
     if message_ids:
         try:
             max_pinned_id = str(max(int(mid) for mid in message_ids))
@@ -4605,7 +4587,7 @@ async def record_reaction_add(
     ctx: GlobalContext,
     payload: discord.RawReactionActionEvent,
     *,
-    bot_user_id: Optional[int] = None,
+    bot_user_id: int | None = None,
 ) -> None:
     now = _now_ms()
     emoji_key = _emoji_key_from_parts(
@@ -4651,7 +4633,7 @@ async def record_reaction_remove(
     ctx: GlobalContext,
     payload: discord.RawReactionActionEvent,
     *,
-    bot_user_id: Optional[int] = None,
+    bot_user_id: int | None = None,
 ) -> None:
     now = _now_ms()
     emoji_key = _emoji_key_from_parts(

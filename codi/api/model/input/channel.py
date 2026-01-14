@@ -2,14 +2,18 @@ from __future__ import annotations
 
 import builtins
 import re
-from typing import TYPE_CHECKING, List
+from datetime import datetime
+from typing import TYPE_CHECKING
 
-from .topic import Topic
+from typed_json import JSONDict, coerce_str, require_obj
+
 from .entity import Entity
 from .message import Message
+from .topic import Topic
 
 if TYPE_CHECKING:
     from .community import Community
+    from .member import Member
 
 
 class Channel(Entity):
@@ -17,7 +21,7 @@ class Channel(Entity):
     This class represents a channel in a community.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self._path: str | None = None
         self._community: Community | None = None
@@ -92,8 +96,8 @@ class Channel(Entity):
 
     def deserialize(
         self,
-        data: dict,
-        members: dict | None = None,
+        data: JSONDict,
+        members: dict[str, Member] | None = None,
         community: Community | None = None,
     ) -> Channel:
         """
@@ -106,31 +110,40 @@ class Channel(Entity):
         """
         super().deserialize(data)
 
-        self._path = data["path"]
+        self._path = coerce_str(data.get("path"), field="path")
         self._community = community
 
-        try:
-            self._topics = [Topic().deserialize(topic, self) for topic in data["topics"]]
-        except KeyError:
+        topics_value = data.get("topics")
+        if isinstance(topics_value, list):
+            self._topics = []
+            for topic in topics_value:
+                if isinstance(topic, dict):
+                    self._topics.append(Topic().deserialize(require_obj(topic), self))
+        else:
             self._topics = []
 
         return self
 
-    def time_sorted_messages(self) -> List[Message]:
+    def time_sorted_messages(self) -> list[Message]:
         return sorted(self.messages.values(), key=lambda message: message.timestamp)
 
-    def as_annot(self, filename):
+    def as_annot(self, filename: str) -> None:
         """Export this channel messages in .annot format.
         Useful for compatibility with Elsner-Charniak modified algorithm and files.
 
         :filename: name of the file to save. Should include .annot extension."""
+
+        def _to_epoch_seconds(timestamp: datetime | int) -> int:
+            if isinstance(timestamp, datetime):
+                return int(timestamp.timestamp())
+            return int(timestamp)
+
         with open(filename, "w") as file:
-            first_message = True
+            base_time: datetime | int | None = None
             for message in self.time_sorted_messages():
                 # FIXME Marco fix for timestamps other than datetime.datetime
-                if first_message:
+                if base_time is None:
                     base_time = message.timestamp
-                    first_message = False
 
                 clean_text = message.original_text.replace("\n", " ")
                 clean_text = clean_text.replace("\r", " ")
@@ -144,9 +157,13 @@ class Channel(Entity):
                             new_name = "Author_" + author
                         clean_text = re.sub("<@!?" + author + ">", "" + new_name + ":", clean_text)
                 clean_name = message.author.cleaned_username
+                if base_time is None:
+                    base_time = message.timestamp
+                assert base_time is not None
+                elapsed_seconds = _to_epoch_seconds(message.timestamp) - _to_epoch_seconds(base_time)
                 # TODO add replies
                 file.write(
                     f"{message.conversation if message.conversation is not None else 'T1234'} "
-                    f"{int((message.timestamp - base_time).total_seconds())} {clean_name} :  "
+                    f"{elapsed_seconds} {clean_name} :  "
                     f"{clean_text}\n"
                 )

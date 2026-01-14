@@ -1,6 +1,6 @@
 from django.urls import path
 
-from ..views import *
+from ..views import StatisticsPredictionView, StatisticsValidationView
 
 urlpatterns = [
     path("validation", StatisticsValidationView.as_view(), name="validation statistics"),

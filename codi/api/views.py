@@ -1,10 +1,12 @@
 import json
 import os
-from typing import Any
 
 from rest_framework import status
+from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
+
+from typed_json import JSONDict
 
 from .model.disentanglement.chat import Chat
 from .model.disentanglement.content import Content
@@ -43,7 +45,7 @@ class TrainingView(APIView):
     _model = Model()
 
     @error_handling
-    def post(self, request):
+    def post(self, request: Request) -> Response:
         try:
             features_int = request.data["features"]
         except KeyError:
@@ -68,7 +70,7 @@ class ValidateView(APIView):
     _model = Model()
 
     @error_handling
-    def post(self, request):
+    def post(self, request: Request) -> Response:
         try:
             features_int = request.data["features"]
         except KeyError:
@@ -89,7 +91,7 @@ class PredictView(APIView):
     _model = Model()
 
     @error_handling
-    def post(self, request):
+    def post(self, request: Request) -> Response:
         try:
             features_int = request.data["features"]
         except KeyError:
@@ -109,15 +111,20 @@ class ConvertView(APIView):
     parser_classes = [PlainParser]
 
     @error_handling
-    def post(self, request):
+    def post(self, request: Request) -> Response:
         convert_path = os.path.join(os.path.dirname(__file__), "training/tmp/convert")
         if not os.path.exists(convert_path):
             os.makedirs(convert_path)
 
         with open(os.path.join(os.path.dirname(__file__), "training/tmp/convert/custom.annot"), "w") as f:
-            f.write(request.data)
+            payload: object = request.data
+            if isinstance(payload, dict):
+                content = str(payload.get("text", ""))
+            else:
+                content = str(payload)
+            f.write(content)
 
-        with open(os.path.join(os.path.dirname(__file__), "collections/names"), "r") as f:
+        with open(os.path.join(os.path.dirname(__file__), "collections/names")) as f:
             names = f.readlines()
             file = convert_annot(names, "custom")
 
@@ -128,20 +135,20 @@ class ConvertView(APIView):
 # Get Statistics #
 ##################
 class StatisticsValidationView(APIView):
-    _community_and_stats: dict[str, Any] = {}
+    _community_and_stats: JSONDict = {}
 
-    def get(self, request):
-        with open(os.path.join(os.path.dirname(__file__), "training/tmp/json/latest-validation.json"), "r") as f:
+    def get(self, request: Request) -> Response:
+        with open(os.path.join(os.path.dirname(__file__), "training/tmp/json/latest-validation.json")) as f:
             self._community_and_stats = json.load(f)
 
         return Response(status=status.HTTP_200_OK, data=self._community_and_stats)
 
 
 class StatisticsPredictionView(APIView):
-    _community_and_stats: dict[str, Any] = {}
+    _community_and_stats: JSONDict = {}
 
-    def get(self, request):
-        with open(os.path.join(os.path.dirname(__file__), "training/tmp/json/latest-prediction.json"), "r") as f:
+    def get(self, request: Request) -> Response:
+        with open(os.path.join(os.path.dirname(__file__), "training/tmp/json/latest-prediction.json")) as f:
             self._community_and_stats = json.load(f)
 
         return Response(status=status.HTTP_200_OK, data=self._community_and_stats)

@@ -17,3 +17,8 @@ cache.db
 all_memes.json
 /data/
 /CODI_repo/
+.hypothesis/
+.coverage
+/.coverage.*
+coverage.xml
+*.log

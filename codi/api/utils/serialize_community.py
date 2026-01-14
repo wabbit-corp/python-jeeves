@@ -1,42 +1,48 @@
 from __future__ import annotations
 
 import datetime
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
-from ..model.input.content import *
-from ..model.input.mention import *
+from typed_json import JSON, JSONDict
+
 from ..model.input.channel import Channel
+from ..model.input.content import Code, Emoji, Link, Multimedia, Text
+from ..model.input.mention import ChannelMention, MemberMention
 from ..model.input.message import Message
 
 if TYPE_CHECKING:
     from ..model.input.community import Community
 
 
-def serialize_community(community: Community) -> dict[str, Any]:
-    out = {
+def serialize_community(community: Community) -> JSONDict:
+    members: list[JSON] = []
+    authors: list[JSON] = []
+    channels: list[JSON] = []
+
+    out: JSONDict = {
         "platform": community.platform,
         "id": community.uuid,
         "name": community.name,
-        "members": [],
-        "authors": [],
-        "channels": [],
+        "members": members,
+        "authors": authors,
+        "channels": channels,
     }
 
-    serialize_members(community, out)
-    serialize_authors(community, out)
-    serialize_channels(community, out)
+    serialize_members(community, members)
+    serialize_authors(community, authors)
+    serialize_channels(community, channels)
 
     return out
 
 
-def serialize_members(community: Community, out: dict[str, Any]) -> None:
+def serialize_members(community: Community, members: list[JSON]) -> None:
     for member in community.members:
-        out["members"].append({"id": community.members[member].uuid, "name": community.members[member].username})
+        members.append({"id": community.members[member].uuid, "name": community.members[member].username})
 
 
-def serialize_authors(community: Community, out: dict[str, Any]) -> None:
+def serialize_authors(community: Community, authors: list[JSON]) -> None:
     for author in community.authors:
-        out["authors"].append(
+        authors.append(
             {
                 "id": community.authors[author].uuid,
                 "name": community.authors[author].username,
@@ -45,9 +51,9 @@ def serialize_authors(community: Community, out: dict[str, Any]) -> None:
         )
 
 
-def serialize_channels(community: Community, out: dict[str, Any]) -> None:
+def serialize_channels(community: Community, channels: list[JSON]) -> None:
     for channel in community.channels:
-        out["channels"].append(
+        channels.append(
             {
                 "id": community.channels[channel].uuid,
                 "path": community.channels[channel].path,
@@ -57,11 +63,11 @@ def serialize_channels(community: Community, out: dict[str, Any]) -> None:
         )
 
 
-def serialize_topics(channel: Channel) -> list[dict[str, Any]]:
-    topics: list[dict[str, Any]] = []
+def serialize_topics(channel: Channel) -> list[JSON]:
+    topics: list[JSON] = []
 
-    for i, topic in enumerate(channel.topics):
-        topics.append({"description": channel.topics[i].description, "keywords": channel.topics[i].keywords})
+    for topic in channel.topics:
+        topics.append({"description": topic.description, "keywords": topic.keywords})
 
     return topics
 
@@ -78,8 +84,8 @@ def serialize_topics(channel: Channel) -> list[dict[str, Any]]:
 #     return conversations
 
 
-def serialize_messages(channel: Channel) -> list[dict[str, Any]]:
-    messages: list[dict[str, Any]] = []
+def serialize_messages(channel: Channel) -> list[JSON]:
+    messages: list[JSON] = []
 
     for message in channel.messages.values():
         if not isinstance(message.timestamp, int):
@@ -104,44 +110,44 @@ def serialize_messages(channel: Channel) -> list[dict[str, Any]]:
     return messages
 
 
-def serialize_attachments(message: Message) -> list[dict[str, Any]]:
-    attachments: list[dict[str, Any]] = []
+def serialize_attachments(message: Message) -> list[JSON]:
+    attachments: list[JSON] = []
 
-    for i, attachment in enumerate(message.attachments):
+    for attachment in message.attachments:
         attachments.append(
             {
-                "urls": message.attachments[i].url,
+                "urls": attachment.url,
             }
         )
 
     return attachments
 
 
-def serialize_contents(message: Message) -> list[dict[str, Any]]:
-    contents: list[dict[str, Any]] = []
+def serialize_contents(message: Message) -> list[JSON]:
+    contents: list[JSON] = []
 
-    for i, content in enumerate(message.contents):
-        contents.append(
-            {
-                "type": str(message.contents[i].__class__.__name__).lower(),
-                "start_position": message.contents[i].start_position,
-                "end_position": message.contents[i].end_position,
-            }
-        )
+    for content in message.contents:
+        content_entry: JSONDict = {
+            "type": str(content.__class__.__name__).lower(),
+            "start_position": content.start_position,
+            "end_position": content.end_position,
+        }
 
-        if isinstance(message.contents[i], Text):
-            contents[i]["text"] = message.contents[i].text
-        elif isinstance(message.contents[i], Link) or isinstance(content, Multimedia):
-            contents[i]["urls"] = message.contents[i].url
-        elif isinstance(message.contents[i], Emoji):
-            contents[i]["unicode"] = message.contents[i].unicode
-        elif isinstance(message.contents[i], Code):
-            contents[i]["code"] = message.contents[i].code
-        elif isinstance(message.contents[i], MemberMention):
-            contents[i]["memberId"] = message.contents[i].member.uuid
-            message.text = message.text.replace("__MEMBER_MENTION__", f"{message.contents[i].member.username}:", 1)
-        elif isinstance(message.contents[i], ChannelMention):
-            contents[i]["channelId"] = message.contents[i].channel.uuid
-            message.text = message.text.replace("__CHANNEL_MENTION__", f"{message.contents[i].channel.path}:", 1)
+        if isinstance(content, Text):
+            content_entry["text"] = content.text
+        elif isinstance(content, Link) or isinstance(content, Multimedia):
+            content_entry["urls"] = content.url
+        elif isinstance(content, Emoji):
+            content_entry["unicode"] = content.unicode
+        elif isinstance(content, Code):
+            content_entry["code"] = content.code
+        elif isinstance(content, MemberMention):
+            content_entry["memberId"] = content.member.uuid
+            message.text = message.text.replace("__MEMBER_MENTION__", f"{content.member.username}:", 1)
+        elif isinstance(content, ChannelMention):
+            content_entry["channelId"] = content.channel.uuid
+            message.text = message.text.replace("__CHANNEL_MENTION__", f"{content.channel.path}:", 1)
+
+        contents.append(content_entry)
 
     return contents

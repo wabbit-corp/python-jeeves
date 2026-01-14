@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
 
-import os
-import json
-import time
 import argparse
-import requests
+import json
+import os
 
+import requests
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

@@ -1,3 +1,31 @@
+[project]
+name = "jeeves"
+version = "0.1.0"
+requires-python = ">=3.10"
+dependencies = [
+    "aiohttp",
+    "discord.py",
+    "Django",
+    "djangorestframework",
+    "emoji",
+    "hypothesis",
+    "imbalanced-learn",
+    "Levenshtein",
+    "numpy",
+    "openai",
+    "PyGithub",
+    "PyYAML",
+    "python-dateutil",
+    "python-dotenv",
+    "pytz",
+    "requests",
+    "scikit-learn",
+    "sentence-transformers",
+    "timezonefinder",
+    "tqdm",
+    "youtube-transcript-api",
+]
+
 [tool.black]
 line-length = 120
 target-version = ["py310"]
@@ -16,3 +44,18 @@ ignore = ["E501"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests", "codi/api/tests"]
+
+[tool.deptry.package_module_name_map]
+"discord.py" = "discord"
+"djangorestframework" = "rest_framework"
+"imbalanced-learn" = "imblearn"
+"PyGithub" = "github"
+"PyYAML" = "yaml"
+"python-dateutil" = "dateutil"
+"python-dotenv" = "dotenv"
+"scikit-learn" = "sklearn"
+"sentence-transformers" = "sentence_transformers"
+"youtube-transcript-api" = "youtube_transcript_api"
+
+[tool.deptry]
+per_rule_ignores = { "DEP002" = ["hypothesis"] }

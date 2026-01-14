@@ -40,17 +40,15 @@ async def get_joke() -> JSONDict:
     else:
         while True:
             j = int(np.random.choice(np.arange(len(scores)), p=scores))
-            opening = reddit_jokes[j]["title"]
-            punchline = reddit_jokes[j]["body"]
-            # if BAD_WORD_RE.search(opening) or BAD_WORD_RE.search(punchline):
-            #     continue
             if j not in seen_jokes_set:
                 break
+    opening = reddit_jokes[j]["title"]
+    punchline = reddit_jokes[j]["body"]
     seen_jokes.append(j)
     seen_jokes_set.add(j)
     return {
-        "opening": reddit_jokes[j]["title"],
-        "punchline": reddit_jokes[j]["body"],
+        "opening": opening,
+        "punchline": punchline,
         "reddit_score": reddit_jokes[j]["score"],
     }
 

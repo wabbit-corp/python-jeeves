@@ -1,11 +1,11 @@
 import os
 
-from codi.api.tests.framework import Framework
 from codi.api.model.disentanglement.model import Model
+from codi.api.tests.framework import Framework
 
 
 class TestModel(Framework):
-    def setUp(self, path: str | None = None):
+    def setUp(self, path: str | None = None) -> None:
         assert path is not None
         path = os.path.join(os.path.dirname(__file__), f"./fixture_data/{path}")
         data = self._read_data_from_fixtures(path)
@@ -15,10 +15,10 @@ class TestModel(Framework):
 
 
 class TestPairs(TestModel):
-    def setUp(self, path: str | None = None):
+    def setUp(self, path: str | None = None) -> None:
         super().setUp("./community_for_pair_extraction.json")
 
-    def test_get_all_pairs(self):
+    def test_get_all_pairs(self) -> None:
         messages = [message for message in self._messages.values()]
 
         pairs_of_ids = []

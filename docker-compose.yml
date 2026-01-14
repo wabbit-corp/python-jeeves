@@ -1,0 +1,14 @@
+services:
+  servant:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: servant:latest
+    command: ["python", "servant_app.py"]
+    volumes:
+      - ./.private.yml:/app/.private.yml:ro
+      - codi-models:/app/codi/api/training/tmp/models
+    restart: unless-stopped
+
+volumes:
+  codi-models:

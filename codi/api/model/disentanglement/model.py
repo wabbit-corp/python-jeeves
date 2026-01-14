@@ -1,31 +1,52 @@
-import os
-import re
-from typing import Any, Sequence, cast
-
-import tqdm
-import time
-import json
-import numpy
-import pickle
-import datetime
 import configparser
+import datetime
+import json
+import os
+import pickle
+import re
+import time
+from collections.abc import Sequence
+from typing import Protocol, runtime_checkable
+
+import numpy
+import tqdm
+
+# from imblearn.combine import SMOTETomek
+from imblearn.over_sampling import SMOTE
 
 # from nltk.classify import MaxentClassifier, megam
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
 
-# from imblearn.combine import SMOTETomek
-from imblearn.over_sampling import SMOTE
+from typed_json import JSONDict
 
-from ..input.channel import Channel
-from ..input.message import Message
-from .relatedness import Relatedness
-from .conversation import Conversation
-from ..input.community import Community
-from ...utils.compute_statistics import *
+from ...utils.compute_statistics import Statistics, f_score, micro_averaged_f_score_labels
 from ...utils.decorators import measure_time
-from ..disentanglement.feature import Feature
 from ...utils.serialize_community import serialize_community
+from ..disentanglement.feature import Feature
+from ..input.channel import Channel
+from ..input.community import Community
+from ..input.message import Message
+from .conversation import Conversation
+from .relatedness import Relatedness
+
+
+@runtime_checkable
+class PredictProbaModel(Protocol):
+    def predict(self, data: object, /) -> Sequence[int]: ...
+
+    def predict_proba(self, data: object, /) -> Sequence[Sequence[float]]: ...
+
+
+class ProbabilityDistribution(Protocol):
+    def prob(self, label: int) -> float: ...
+
+
+@runtime_checkable
+class MegamModel(Protocol):
+    def classify_many(self, features: list[dict[str, float | int]]) -> Sequence[int]: ...
+
+    def prob_classify_many(self, features: list[dict[str, float | int]]) -> Sequence[ProbabilityDistribution]: ...
 
 
 class Model:
@@ -43,7 +64,7 @@ class Model:
         self._constants: dict[str, str] = dict(config["constants"])
         self._hyperparameters: dict[str, str] = dict(config["hyperparameters"])
         self._training_set: Community | None = None
-        self._trained_model: Any | None = None
+        self._trained_model: PredictProbaModel | MegamModel | None = None
 
         self._load()
 
@@ -79,9 +100,7 @@ class Model:
         :param model_type: The type of the model (i.e. the feature group name)
         """
         try:
-            with open(
-                os.path.join(os.path.dirname(__file__), "../../training/tmp/json/latest-training.json"), "r"
-            ) as f:
+            with open(os.path.join(os.path.dirname(__file__), "../../training/tmp/json/latest-training.json")) as f:
                 json_obj = json.load(f)
                 self._training_set = Community().deserialize(json_obj)
         except FileNotFoundError:
@@ -256,12 +275,15 @@ class Model:
             flattened_row = []
 
             for item in row:
-                if isinstance(item.val, list):
+                value = item.val
+                if value is None:
+                    raise ValueError("Feature values must be set before flattening.")
+                if isinstance(value, list):
                     # FIXME Marco: Apparently values greater than 1 are bad for these classifiers (Should investigate)
-                    binary_list = [it if it == 0.0 else 1.0 for it in item.val]
+                    binary_list = [it if it == 0.0 else 1.0 for it in value]
                     flattened_row.extend(binary_list)
                 else:
-                    flattened_row.append(item.val if item.val == 0.0 else 1.0)
+                    flattened_row.append(value if value == 0.0 else 1.0)
 
             flattened_matrix.append(flattened_row)
 
@@ -302,10 +324,7 @@ class Model:
         feature_matrix: list[list[Feature]],
         pairs: list[Relatedness],
         group: str | None = None,
-    ) -> tuple[Any, dict[str, dict[str, Relatedness]]]:
-        # FIXME the type Any in this hinting should be resolved to the actual type by providing an interface for
-        #  trained models with basic methods that can be called on all trained models (e.g., predict)
-        #  with appropriate type hinting
+    ) -> tuple[Sequence[int], dict[str, dict[str, Relatedness]]]:
         """
         Given a feature matrix, compute a prediction of its Maximum Entropy.
 
@@ -320,13 +339,21 @@ class Model:
         assert self._trained_model is not None
 
         classifier = self._hyperparameters["classifier"]
+        predictions: Sequence[int]
+        megam_probabilities: Sequence[ProbabilityDistribution] | None = None
+        classifier_probabilities: Sequence[Sequence[float]] | None = None
+
         if classifier == "MEGAM":
-            features = [({str(index): elem for (index, elem) in enumerate(a)}) for a in flattened_matrix]
+            if not isinstance(self._trained_model, MegamModel):
+                raise TypeError("Trained model does not support MEGAM inference.")
+            features = [{str(index): elem for (index, elem) in enumerate(a)} for a in flattened_matrix]
             predictions = self._trained_model.classify_many(features)
-            probabilities = self._trained_model.prob_classify_many(features)
+            megam_probabilities = self._trained_model.prob_classify_many(features)
         elif classifier == "LOGISTIC_REGRESSION" or classifier == "RANDOM_FOREST":
+            if not isinstance(self._trained_model, PredictProbaModel):
+                raise TypeError("Trained model does not support predict_proba inference.")
             predictions = self._trained_model.predict(flattened_matrix)
-            probabilities = self._trained_model.predict_proba(flattened_matrix)
+            classifier_probabilities = self._trained_model.predict_proba(flattened_matrix)
         else:
             raise RuntimeError(f"Unsupported classifier: {classifier}")
 
@@ -344,9 +371,11 @@ class Model:
         for i, pair in enumerate(pairs):
             # TODO this checks can be optimized with a function to extract percentages for each classifier
             if classifier == "MEGAM":
-                pair.percentage = probabilities[i].prob(1)
+                assert megam_probabilities is not None
+                pair.percentage = megam_probabilities[i].prob(1)
             elif classifier == "LOGISTIC_REGRESSION" or classifier == "RANDOM_FOREST":
-                pair.percentage = probabilities[i][1]
+                assert classifier_probabilities is not None
+                pair.percentage = classifier_probabilities[i][1]
                 # total_discrepancy += abs(probabilities[i][1] - fake_predictions[i][1])
                 # pair.percentage = fake_predictions[i][1]
                 # if predictions[i] != fake_predictions[i][0]:
@@ -376,7 +405,7 @@ class Model:
     # disentanglement process.                                                                                    #
     ###############################################################################################################
     @staticmethod
-    def _compute_weight(probability: float):
+    def _compute_weight(probability: float) -> float:
         """
         Given a probability, compute the weight of the pair.
 
@@ -388,8 +417,10 @@ class Model:
     @staticmethod
     def _get_pair_probability(pairs: dict[str, Relatedness], second_message: Message) -> float:
         try:
-            probability = pairs[second_message.uuid].percentage
+            probability: float | None = pairs[second_message.uuid].percentage
         except KeyError:
+            probability = 0.5
+        if probability is None:
             probability = 0.5
         return probability
 
@@ -555,7 +586,7 @@ class Model:
     def train(
         self,
         training_set: Community,
-        features: list[type[Feature]] = Feature.get_default_features(),
+        features: list[type[Feature]] | None = None,
         group: str | None = None,
     ) -> None:
         """
@@ -567,6 +598,9 @@ class Model:
         :param group: The feature group name
         :return: The trained model
         """
+        if features is None:
+            features = Feature.get_default_features()
+
         for channel in training_set.channels.values():
             if len(channel.messages) > 0:
                 unigram_probabilities = self.get_unigram_probabilities(training_set)
@@ -582,11 +616,11 @@ class Model:
     def predict(
         self,
         community: Community,
-        features: list[type[Feature]] = Feature.get_default_features(),
+        features: list[type[Feature]] | None = None,
         validation: bool = False,
         groups: list[type[Feature]] | None = None,
         retrain: bool = True,
-    ) -> Community:
+    ) -> JSONDict:
         """
         Given a community, divide its messages into conversations. In order to do so, we use the `predict()` method
         of the trained model.
@@ -600,16 +634,19 @@ class Model:
         """
         try:
             self._load()
-        except Exception as e:
-            raise Exception(e)
+        except Exception:
+            raise
 
         times: dict[str, float] = {}
         labels: list[int] = []
-        statistics: dict[str, dict[str, float | None | dict[str, float]]] = {}
+        statistics: Statistics = {}
         predictions: Sequence[int] = []
 
         self._pred_conversations = []
-        gold: dict[str, Any] = serialize_community(community)
+        gold: JSONDict = serialize_community(community)
+
+        if features is None:
+            features = Feature.get_default_features()
 
         if not validation and not retrain and self._trained_model is None:
             raise RuntimeError(
@@ -635,7 +672,7 @@ class Model:
                         start = time.time()
 
                         assert self._training_set is not None
-                        group_cls = cast(Any, group)
+                        group_cls = group
                         _, train_time = self.train(
                             self._training_set, group_cls.get_group_features(), group=group_cls().__str__().lower()
                         )
@@ -702,8 +739,8 @@ class Model:
             self._pred_conversations = []
 
         if validation:
-            community = community.save_json(1, statistics, gold)
+            result = community.save_json(1, statistics, gold)
         else:
-            community = community.save_json(2, statistics)
+            result = community.save_json(2, statistics)
 
-        return community
+        return result

@@ -5,13 +5,18 @@ import configparser
 import json
 import os
 import pickle
-from typing import Any
+from typing import TYPE_CHECKING
 
-from .entity import Entity
-from .channel import Channel
-from .message import Message
-from .member import Member, Author
+from typed_json import JSON, JSONDict, coerce_str, obj_to_json, require_obj
+
 from ...utils.serialize_community import serialize_community
+from .channel import Channel
+from .entity import Entity
+from .member import Author, Member
+from .message import Message
+
+if TYPE_CHECKING:
+    from ...utils.compute_statistics import Statistics
 
 
 class Community(Entity):
@@ -19,7 +24,7 @@ class Community(Entity):
     This class represents a community.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         config = configparser.ConfigParser()
         config.read(os.path.join(os.path.dirname(__file__), "../../../../config.ini"))
@@ -114,7 +119,7 @@ class Community(Entity):
 
     authors = builtins.property(_get_authors, _set_authors)
 
-    def _save(self):
+    def _save(self) -> None:
         """
         Save the community to the data/ directory. If the community is new, it will be created. If the community
         already exists, it will be overwritten. A maximum of "_max_communities" different communities can be kept in
@@ -141,9 +146,9 @@ class Community(Entity):
     def save_json(
         self,
         op_type: int,
-        statistics: dict | None = None,
-        gold: list[int] | dict[str, Any] | None = None,
-    ):
+        statistics: Statistics | None = None,
+        gold: JSON | None = None,
+    ) -> JSONDict:
         """
         Save the community into a JSON file.
 
@@ -161,7 +166,7 @@ class Community(Entity):
             community_mod["gold"] = gold
 
         if op_type == 1 or op_type == 2:
-            community_mod["statistics"] = statistics
+            community_mod["statistics"] = obj_to_json(statistics) if statistics is not None else None
 
         match op_type:
             case 0:
@@ -201,7 +206,7 @@ class Community(Entity):
 
         return messages
 
-    def deserialize(self, request: dict) -> Community:
+    def deserialize(self, request: JSONDict) -> Community:
         """
         Deserialize a request into a Community object.
 
@@ -210,30 +215,44 @@ class Community(Entity):
         """
         authors: dict[str, Author] = {}
         uninitialized_channels: dict[str, Channel] = {}
-        self._platform = request["platform"].lower()
-        self._uuid = request["id"]
-        self._name = request["name"].lower().replace(" ", "-")
+        self._platform = coerce_str(request.get("platform"), field="platform").lower()
+        self._uuid = coerce_str(request.get("id"), field="id")
+        self._name = coerce_str(request.get("name"), field="name").lower().replace(" ", "-")
 
         # Deserialize Members
-        for member in request["members"]:
-            member_instance = Member().deserialize(member, self)
+        members_value = request.get("members")
+        if not isinstance(members_value, list):
+            raise ValueError("members must be a list")
+        for member in members_value:
+            member_instance = Member().deserialize(require_obj(member), self)
             self._members[member_instance.uuid] = member_instance
 
         # Deserialize Channels
-        for channel in request["channels"]:
-            channel_instance = Channel().deserialize(channel, self._members, self)
+        channels_value = request.get("channels")
+        if not isinstance(channels_value, list):
+            raise ValueError("channels must be a list")
+        channel_entries: list[JSONDict] = []
+        channel_ids: list[str] = []
+        for channel in channels_value:
+            channel_obj = require_obj(channel)
+            channel_entries.append(channel_obj)
+            channel_instance = Channel().deserialize(channel_obj, self._members, self)
             self._channels[channel_instance.uuid] = channel_instance
+            channel_ids.append(channel_instance.uuid)
 
         # Deserialize Messages
-        for i, channel in enumerate(self._channels):
-            for message in request["channels"][i]["messages"]:
+        for index, channel_id in enumerate(channel_ids):
+            messages_value = channel_entries[index].get("messages")
+            if not isinstance(messages_value, list):
+                continue
+            for message in messages_value:
                 message_instance = Message()
-                message_instance.channel = self._channels[channel]
+                message_instance.channel = self._channels[channel_id]
                 message_instance.deserialize(
-                    message, self._members, self._channels, uninitialized_channels, authors, self._platform
+                    require_obj(message), self._members, self._channels, uninitialized_channels, authors, self._platform
                 )
 
-                self._channels[channel].messages[message_instance.uuid] = message_instance
+                self._channels[channel_id].messages[message_instance.uuid] = message_instance
 
         # Merge authors and uninitialized channels into the community authors and channels respectively
         self._authors |= authors
@@ -243,10 +262,10 @@ class Community(Entity):
 
         return self
 
-    def from_json(self, filename):
+    def from_json(self, filename: str) -> None:
         """Initialize this community with the content of the json file.
 
         :filename: name of the input json file."""
-        with open(filename, "r") as file:
+        with open(filename) as file:
             community = json.load(file)
             self.deserialize(community)

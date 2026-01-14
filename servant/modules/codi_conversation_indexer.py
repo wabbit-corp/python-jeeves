@@ -9,10 +9,12 @@ import sqlite3
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TypeVar, TypedDict
+from typing import TypedDict, TypeVar
 from uuid import uuid4
 
+from codi import disentangle as codi_disentangle
 from servant.defs import GlobalContext, RoutineTask, ToolDef
+from servant.modules import background_indexer
 from typed_json import (
     JSON,
     JSONDict,
@@ -21,9 +23,6 @@ from typed_json import (
     coerce_optional_str,
     coerce_optional_str_list,
 )
-from servant.modules import background_indexer
-
-from codi import disentangle as codi_disentangle
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -366,8 +365,11 @@ def _assign_conversation_ids(
     min_overlap_ratio: float,
     id_factory: Callable[[], str] | None = None,
 ) -> tuple[dict[str, str], list[str]]:
+    def _default_id_factory() -> str:
+        return f"codi-{uuid4().hex}"
+
     if id_factory is None:
-        id_factory = lambda: f"codi-{uuid4().hex}"
+        id_factory = _default_id_factory
 
     assignments: dict[str, str] = {}
     used_existing: set[str] = set()
@@ -386,7 +388,7 @@ def _assign_conversation_ids(
 
     candidates.sort(key=lambda x: (x[0], x[1]), reverse=True)
 
-    for intersection, overlap_ratio, temp_id, conv_id in candidates:
+    for _intersection, overlap_ratio, temp_id, conv_id in candidates:
         if temp_id in assignments or conv_id in used_existing:
             continue
         if overlap_ratio < min_overlap_ratio:
@@ -542,20 +544,29 @@ async def _analyze_channel(
         channel_name=str(channel_name or channel_id),
     )
 
-    community_module = importlib.import_module("api.model.input.community")
-    community_cls = getattr(community_module, "Community")
+    community_module = importlib.import_module("codi.api.model.input.community")
+    community_cls = community_module.Community
     community = community_cls().deserialize(community_obj)
     model = codi_disentangle._get_model(model_path)
     result = model.predict(community, features=resolved_features, retrain=False)
 
     predicted_groups: dict[str, list[str]] = {}
-    for channel in result.get("channels", []):
-        for message in channel.get("messages", []):
-            temp_id = message.get("conversationId")
-            msg_id = message.get("id")
-            if not temp_id or not msg_id:
+    channels = result.get("channels")
+    if isinstance(channels, list):
+        for channel in channels:
+            if not isinstance(channel, dict):
                 continue
-            predicted_groups.setdefault(temp_id, []).append(msg_id)
+            messages_list = channel.get("messages")
+            if not isinstance(messages_list, list):
+                continue
+            for message in messages_list:
+                if not isinstance(message, dict):
+                    continue
+                temp_id = message.get("conversationId")
+                msg_id = message.get("id")
+                if not (isinstance(temp_id, str) and isinstance(msg_id, str)):
+                    continue
+                predicted_groups.setdefault(temp_id, []).append(msg_id)
 
     existing_groups, existing_meta = await _with_db(
         ctx,

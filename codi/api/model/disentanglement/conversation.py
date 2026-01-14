@@ -13,7 +13,7 @@ class Conversation(Entity):
     This class represents a conversation -- i.e. a set of correlated messages.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self._messages: list[Message] = []
 

@@ -4,8 +4,8 @@ from codi import disentangle as codi
 
 
 class TestCodiDisentangleHelpers(unittest.TestCase):
-    def test_normalize_message_with_explicit_fields(self):
-        message = {
+    def test_normalize_message_with_explicit_fields(self) -> None:
+        message: dict[str, object] = {
             "id": "m1",
             "author_id": "u1",
             "author_name": "Alice",
@@ -20,8 +20,8 @@ class TestCodiDisentangleHelpers(unittest.TestCase):
         self.assertEqual(normalized["content"], "hello")
         self.assertEqual(normalized["timestamp"], "123")
 
-    def test_normalize_message_with_author_object(self):
-        message = {
+    def test_normalize_message_with_author_object(self) -> None:
+        message: dict[str, object] = {
             "message_id": "m2",
             "author": {"id": 42, "name": "Bob"},
             "text": "hi",
@@ -34,12 +34,12 @@ class TestCodiDisentangleHelpers(unittest.TestCase):
         self.assertEqual(normalized["content"], "hi")
         self.assertEqual(normalized["timestamp"], "5")
 
-    def test_normalize_message_requires_author(self):
+    def test_normalize_message_requires_author(self) -> None:
         with self.assertRaises(ValueError):
             codi._normalize_message({"content": "missing author"}, 0)
 
-    def test_build_community_minimal(self):
-        messages = [
+    def test_build_community_minimal(self) -> None:
+        messages: list[dict[str, object]] = [
             {
                 "id": "1",
                 "author_id": "u1",

@@ -2,14 +2,14 @@ from __future__ import annotations
 
 import builtins
 import re
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
-from .member import Member
 from .content import Content
+from .member import Member
 
 if TYPE_CHECKING:
-    from .message import Message
     from .channel import Channel
+    from .message import Message
 
 
 class Mention(Content):
@@ -25,12 +25,12 @@ class MemberMention(Mention):
     This class represents a member mention in a channel.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self._member: Member | None = None
 
-    def __str__(self, content=None):
-        return super.__str__(self._member.username)
+    def __str__(self, content: str | None = None) -> str:
+        return super().__str__(self.member.username)
 
     def _get_member(self) -> Member:
         """
@@ -55,7 +55,10 @@ class MemberMention(Mention):
         end_position: int,
         message: Message | None = None,
         value: str | None = None,
-        **kwargs: Any,
+        *,
+        members: dict[str, Member] | None = None,
+        member_id: str | None = None,
+        member_name: str | None = None,
     ) -> MemberMention:
         """
         Deserialize a mention into a MemberMention object.
@@ -69,21 +72,17 @@ class MemberMention(Mention):
         """
         super().deserialize(start_position, end_position, message, value)
 
-        members = kwargs.get("members")
-        member_id = kwargs.get("member_id")
-        member_name = kwargs.get("member_name")
+        if members is None or member_id is None:
+            raise ValueError("Member mentions require members and member_id.")
 
         try:
-            assert members is not None
-            assert member_id is not None
             self._member = members[member_id]
-        except KeyError:
-            assert members is not None
-            assert member_id is not None
-            assert message is not None
+        except KeyError as exc:
+            if message is None:
+                raise ValueError("Member mention requires message when member is missing.") from exc
             mention = Member()
             mention.uuid = member_id
-            mention.username = member_name
+            mention.username = member_name or member_id
             mention.community = message.channel.community
 
             members[member_id] = mention
@@ -106,7 +105,7 @@ class MemberMention(Mention):
         :param message_obj: The message object
         :return: The list of mentions of a member in a channel
         """
-        mentions = []
+        mentions: list[MemberMention] = []
         user_mention_regex = re.compile(r"<@!?(\d*)>")
 
         for user_mention in user_mention_regex.finditer(message):
@@ -122,7 +121,7 @@ class MemberMention(Mention):
             )
 
             pattern = f"<@!{user_mention_id}>" if (f"<@!{user_mention_id}>" in message) else f"<@{user_mention_id}>"
-            message = message.replace(pattern, f"__MEMBER_MENTION__", 1)
+            message = message.replace(pattern, "__MEMBER_MENTION__", 1)
 
         return mentions, message
 
@@ -138,7 +137,10 @@ class SlackMemberMention(MemberMention):
         end_position: int,
         message: Message | None = None,
         value: str | None = None,
-        **kwargs: Any,
+        *,
+        members: dict[str, Member] | None = None,
+        member_id: str | None = None,
+        member_name: str | None = None,
     ) -> SlackMemberMention:
         """
         Deserialize a mention into a SlackMemberMention object.
@@ -151,7 +153,15 @@ class SlackMemberMention(MemberMention):
         :param member_name: The name of the member of this mention
         :return: The SlackMemberMention object
         """
-        super().deserialize(start_position, end_position, message, value, **kwargs)
+        super().deserialize(
+            start_position,
+            end_position,
+            message,
+            value,
+            members=members,
+            member_id=member_id,
+            member_name=member_name,
+        )
         return self
 
     @classmethod
@@ -187,7 +197,7 @@ class SlackMemberMention(MemberMention):
             )
 
             pattern = f"<@U{slack_user_mention_id}|{slack_user_mention_name}>"
-            message = message.replace(pattern, f"__MEMBER_MENTION__", 1)
+            message = message.replace(pattern, "__MEMBER_MENTION__", 1)
 
         return mentions, message
 
@@ -197,12 +207,12 @@ class ChannelMention(Mention):
     This class represents a channel mention in a message.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self._channel: Channel | None = None
 
-    def __str__(self, content=None):
-        return super.__str__(self._channel.path)
+    def __str__(self, content: str | None = None) -> str:
+        return super().__str__(self.channel.path)
 
     def _get_channel(self) -> Channel:
         """
@@ -227,7 +237,11 @@ class ChannelMention(Mention):
         end_position: int,
         message: Message | None = None,
         value: str | None = None,
-        **kwargs: Any,
+        *,
+        channels: dict[str, Channel] | None = None,
+        channel_id: str | None = None,
+        channel_name: str | None = None,
+        uninitialized_channels: dict[str, Channel] | None = None,
     ) -> ChannelMention:
         """
         Deserialize a mention into a ChannelMention object.
@@ -241,24 +255,21 @@ class ChannelMention(Mention):
         """
         super().deserialize(start_position, end_position, message, value)
 
-        channels = kwargs.get("channels")
-        channel_id = kwargs.get("channel_id")
-        channel_name = kwargs.get("channel_name")
-        uninitialized_channels = kwargs.get("uninitialized_channels")
+        if channels is None or channel_id is None:
+            raise ValueError("Channel mentions require channels and channel_id.")
 
         try:
-            assert channels is not None
-            assert channel_id is not None
             self._channel = channels[channel_id]
-        except KeyError:
+        except KeyError as exc:
             from .channel import Channel
 
-            assert uninitialized_channels is not None
-            assert channel_id is not None
-            assert message is not None
+            if uninitialized_channels is None:
+                raise ValueError("Channel mention requires uninitialized_channels when channel is missing.") from exc
+            if message is None:
+                raise ValueError("Channel mention requires message when channel is missing.") from exc
             new_channel = Channel()
             new_channel.uuid = channel_id
-            new_channel.path = channel_name
+            new_channel.path = channel_name or channel_id
             new_channel.community = message.channel.community
 
             uninitialized_channels[channel_id] = new_channel
@@ -283,7 +294,7 @@ class ChannelMention(Mention):
         :param message_obj: The message object
         :return: The list of mentions of a member in a channel
         """
-        mentions = []
+        mentions: list[ChannelMention] = []
         channel_mention_regex = re.compile(r"<#(\d*)>")
 
         for channel_mention in channel_mention_regex.finditer(message):
@@ -300,7 +311,7 @@ class ChannelMention(Mention):
             )
 
             pattern = f"<#{channel_mention_id}>"
-            message = message.replace(pattern, f"__CHANNEL_MENTION__", 1)
+            message = message.replace(pattern, "__CHANNEL_MENTION__", 1)
 
         return mentions, message
 
@@ -316,7 +327,11 @@ class SlackChannelMention(ChannelMention):
         end_position: int,
         message: Message | None = None,
         value: str | None = None,
-        **kwargs: Any,
+        *,
+        channels: dict[str, Channel] | None = None,
+        channel_id: str | None = None,
+        channel_name: str | None = None,
+        uninitialized_channels: dict[str, Channel] | None = None,
     ) -> SlackChannelMention:
         """
         Deserialize a mention into a ChannelMention object.
@@ -330,7 +345,16 @@ class SlackChannelMention(ChannelMention):
         :param uninitialized_channels: The uninitialized channels of the community
         :return: The ChannelMention object
         """
-        super().deserialize(start_position, end_position, message, value, **kwargs)
+        super().deserialize(
+            start_position,
+            end_position,
+            message,
+            value,
+            channels=channels,
+            channel_id=channel_id,
+            channel_name=channel_name,
+            uninitialized_channels=uninitialized_channels,
+        )
         return self
 
     @classmethod
@@ -369,7 +393,7 @@ class SlackChannelMention(ChannelMention):
             )
 
             pattern = f"<#C{slack_channel_id}|{slack_channel_name}>"
-            message = message.replace(pattern, f"__CHANNEL_MENTION__", 1)
+            message = message.replace(pattern, "__CHANNEL_MENTION__", 1)
 
         return mentions, message
 

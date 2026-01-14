@@ -1,17 +1,19 @@
 from __future__ import annotations
 
-from servant.defs import (
-    ToolDef,
-    GlobalContext,
-    SECRET_USER_AGENT,
-    SECRET_IMGFLIP_PASSWORD,
-    SECRET_IMGFLIP_USERNAME,
-)
-from typed_json import JSON, JSONDict, coerce_str, obj_to_json
-import requests
 import json
 import time
+
 import Levenshtein
+import requests
+
+from servant.defs import (
+    SECRET_IMGFLIP_PASSWORD,
+    SECRET_IMGFLIP_USERNAME,
+    SECRET_USER_AGENT,
+    GlobalContext,
+    ToolDef,
+)
+from typed_json import JSON, JSONDict, coerce_str, obj_to_json
 
 all_memes: JSON = {}
 all_memes_last_updated: float | None = None
@@ -36,7 +38,7 @@ def _require_secret(ctx: GlobalContext, key: str) -> str:
 def _load_memes_from_file() -> None:
     global all_memes
     try:
-        with open("all_memes.json", "rt", encoding="utf-8") as handle:
+        with open("all_memes.json", encoding="utf-8") as handle:
             loaded = json.load(handle)
     except Exception:
         return
@@ -57,7 +59,7 @@ async def update_meme_templates(ctx: GlobalContext) -> None:
     all_memes = response
     # Save it to a file
     try:
-        with open("all_memes.json", "wt", encoding="utf-8") as f:
+        with open("all_memes.json", "w", encoding="utf-8") as f:
             json.dump(all_memes, f)
     except Exception:
         pass
@@ -184,7 +186,7 @@ generate_meme_tool: ToolDef = ToolDef(
             "properties": {
                 "template_name": {
                     "type": "string",
-                    "description": f"The name of the meme template on Imgflip.",
+                    "description": "The name of the meme template on Imgflip.",
                 },
                 "box_text": {
                     "type": "array",
