@@ -1,0 +1,3 @@
+from re import Pattern
+
+def get_emoji_regexp() -> Pattern[str]: ...

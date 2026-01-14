@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from servant.api.bravesearch import BraveSearchApi
-from servant.defs import GlobalContext, ToolDef, SECRET_BRAVE_KEY
+from servant.defs import SECRET_BRAVE_KEY, GlobalContext, ToolDef
 from typed_json import JSON, JSONDict, coerce_int, coerce_str, require_obj
 
 MODULE_PROMPT = """

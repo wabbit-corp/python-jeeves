@@ -33,7 +33,7 @@ DEFAULT_CHANNEL_COOLDOWN_SECONDS = 15 * 60
 DEFAULT_MODEL_NAME = "all-MiniLM-L6-v2"
 
 _MODEL_LOCK = threading.Lock()
-_MODEL: "SentenceTransformer | None" = None
+_MODEL: SentenceTransformer | None = None
 _MODEL_NAME: str | None = None
 T = TypeVar("T")
 
@@ -126,7 +126,7 @@ def _get_cooldown_seconds(ctx: GlobalContext) -> int:
     return DEFAULT_CHANNEL_COOLDOWN_SECONDS
 
 
-def _get_model(ctx: GlobalContext) -> "SentenceTransformer":
+def _get_model(ctx: GlobalContext) -> SentenceTransformer:
     try:
         from sentence_transformers import SentenceTransformer
     except Exception as exc:  # pragma: no cover - handled at runtime
@@ -196,7 +196,7 @@ def _deserialize_embedding(raw: object) -> list[float] | None:
 def _cosine_similarity(vec_a: list[float], vec_b: list[float]) -> float | None:
     if len(vec_a) != len(vec_b):
         return None
-    return sum(a * b for a, b in zip(vec_a, vec_b))
+    return sum(a * b for a, b in zip(vec_a, vec_b, strict=True))
 
 
 async def _with_db(ctx: GlobalContext, fn: Callable[[sqlite3.Connection], T]) -> T:
@@ -701,7 +701,7 @@ async def _send_dm(ctx: GlobalContext, user_id: str, content: str) -> None:
         fut.result()
 
 
-async def topic_subscriptions_handle_message(ctx: GlobalContext, discord_message: "discord.Message") -> JSONDict:
+async def topic_subscriptions_handle_message(ctx: GlobalContext, discord_message: discord.Message) -> JSONDict:
     guild = getattr(discord_message, "guild", None)
     if guild is None:
         return {"ok": True, "notified": 0}

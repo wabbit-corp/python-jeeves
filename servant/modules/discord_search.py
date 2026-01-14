@@ -3,7 +3,8 @@ from __future__ import annotations
 import datetime as dt
 import logging
 import re
-from typing import AsyncIterator, Iterable, TypeGuard
+from collections.abc import AsyncIterator
+from typing import TypeAlias, TypeGuard
 
 import discord
 
@@ -54,11 +55,11 @@ def _snowflake(value: str | None, field: str) -> discord.Object | None:
         return None
     try:
         return discord.Object(id=int(str(value)))
-    except (TypeError, ValueError):
-        raise ValueError(f"{field} must be a valid snowflake id.")
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{field} must be a valid snowflake id.") from exc
 
 
-ResolvedChannel = discord.abc.GuildChannel | discord.Thread | discord.abc.PrivateChannel
+ResolvedChannel: TypeAlias = discord.abc.GuildChannel | discord.Thread | discord.abc.PrivateChannel
 
 
 async def _resolve_channel(client: discord.Client, channel_id: str) -> ResolvedChannel:
@@ -398,8 +399,8 @@ async def discord_search_members(ctx: GlobalContext, obj: JSON) -> JSONDict:
     if user_id is not None:
         try:
             mid = int(str(user_id))
-        except (TypeError, ValueError):
-            raise ValueError("user_id must be a valid snowflake id.")
+        except (TypeError, ValueError) as exc:
+            raise ValueError("user_id must be a valid snowflake id.") from exc
 
         member = guild.get_member(mid)
         if member is None:

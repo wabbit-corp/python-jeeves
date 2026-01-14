@@ -1,10 +1,10 @@
 from __future__ import annotations
-from typing import Optional, TypeAlias
-from dataclasses import is_dataclass
 
 import hashlib
 import json
 import logging
+from dataclasses import is_dataclass
+from typing import TypeAlias
 
 _logger = logging.getLogger(__name__)
 
@@ -97,8 +97,8 @@ def coerce_bool(value: object, default: bool = False) -> bool:
 def coerce_str(
     value: object,
     *,
-    field: Optional[str] = None,
-    default: Optional[str] = None,
+    field: str | None = None,
+    default: str | None = None,
     allow_empty: bool = True,
     allow_non_str: bool = True,
 ) -> str:
@@ -118,7 +118,7 @@ def coerce_str(
     return value.strip() if not allow_empty else value
 
 
-def coerce_optional_str(value: object, *, allow_non_str: bool = True) -> Optional[str]:
+def coerce_optional_str(value: object, *, allow_non_str: bool = True) -> str | None:
     if value is None:
         return None
     if isinstance(value, (dict, list, tuple, set)):
@@ -132,7 +132,7 @@ def coerce_optional_str(value: object, *, allow_non_str: bool = True) -> Optiona
     return text or None
 
 
-def coerce_optional_str_list(value: object) -> Optional[list[str]]:
+def coerce_optional_str_list(value: object) -> list[str] | None:
     if value is None:
         return None
     if not isinstance(value, list):
@@ -140,13 +140,13 @@ def coerce_optional_str_list(value: object) -> Optional[list[str]]:
     return [str(item) for item in value]
 
 
-def coerce_snowflake(value: object, field: str) -> Optional[str]:
+def coerce_snowflake(value: object, field: str) -> str | None:
     if value is None:
         return None
     try:
         return str(int(str(value)))
-    except (TypeError, ValueError):
-        raise ValueError(f"{field} must be a valid snowflake id.")
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{field} must be a valid snowflake id.") from exc
 
 
 def require_obj(value: JSON) -> JSONDict:

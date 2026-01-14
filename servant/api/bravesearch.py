@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-import aiohttp
 import logging
+
+import aiohttp
 
 from servant.api.rate_limit import RateLimiter
 from typed_json import JSON, JSONDict, obj_to_json
@@ -49,7 +50,7 @@ class BraveSearchApi:
     def set_api_key(self, api_key: str) -> None:
         self.api_key = api_key
 
-    async def __aenter__(self) -> "BraveSearchApi":
+    async def __aenter__(self) -> BraveSearchApi:
         """Async context manager entry."""
         self._session = aiohttp.ClientSession(base_url=self.base_url)
         logger.info("BraveSearchApi session started.")

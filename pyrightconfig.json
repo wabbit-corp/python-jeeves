@@ -11,6 +11,7 @@
   ],
   "stubPath": "stubs",
   "typeCheckingMode": "basic",
+  "pythonVersion": "3.10",
   "reportMissingTypeStubs": "none",
   "reportMissingImports": "none",
   "reportUndefinedVariable": "error",

@@ -6,8 +6,8 @@ import os
 import re
 from pathlib import Path
 
+from servant.defs import ToolDef
 from typed_json import (
-    JSON,
     JSONDict,
     coerce_bool,
     coerce_int,
@@ -15,7 +15,6 @@ from typed_json import (
     obj_to_json,
     require_obj,
 )
-from servant.defs import ToolDef
 
 _MAX_READ_LINES = 250
 _DEFAULT_LS_MAX_ENTRIES = 200

@@ -4,11 +4,11 @@ import asyncio
 import datetime as dt
 import logging
 import sqlite3
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from collections.abc import Callable
 
-from servant.defs import RoutineTask, ToolDef, GlobalContext
+from servant.defs import GlobalContext, RoutineTask, ToolDef
 from typed_json import JSON, JSONDict, coerce_int, coerce_str
 
 _LOGGER = logging.getLogger(__name__)
@@ -542,10 +542,7 @@ commitment_manage_tool: ToolDef = ToolDef(
                 "end_date": {"type": "string", "description": "YYYY-MM-DD."},
                 "interval_days": {"type": "integer", "description": "Defaults to 5."},
                 "status": {"type": "string", "enum": ["active", "cancelled", "ended"]},
-                # list filters
-                "channel_id": {"type": "string"},
-                "user_id": {"type": "string"},
-                "status": {"type": "string"},
+                # list filters reuse channel_id/user_id/status
             },
             "required": ["operation"],
         },
@@ -632,9 +629,8 @@ async def commitment_checkin_task(ctx: GlobalContext, _obj: JSON) -> JSONDict:
             for c in commitments:
                 by_user.setdefault(c.user_id, []).append(c)
 
-            mentioned = " ".join(_mention(uid) for uid in sorted(by_user.keys()))
             lines: list[str] = []
-            lines.append(f"Progress check-in time.")
+            lines.append("Progress check-in time.")
 
             for uid in sorted(by_user.keys()):
                 lines.append(f"{_mention(uid)}")

@@ -5,7 +5,7 @@ from typed_json import JSON, JSONDict, coerce_float_strict, obj_to_json
 
 # https://open-meteo.com/
 
-MODULE_PROMPT = f"""
+MODULE_PROMPT = """
 ## Weather
 You can also use the `get_current_weather` command to get the current weather in a location.
 """
@@ -13,7 +13,7 @@ You can also use the `get_current_weather` command to get the current weather in
 
 async def fetch_weather_forecast(latitude: float, longitude: float) -> JSONDict:
     api_url = f"https://api.open-meteo.com/v1/forecast?latitude={latitude}&longitude={longitude}"
-    api_url += f"&current=temperature_2m,apparent_temperature,is_day,precipitation,rain,showers,snowfall,cloud_cover,wind_speed_10m,wind_gusts_10m"
+    api_url += "&current=temperature_2m,apparent_temperature,is_day,precipitation,rain,showers,snowfall,cloud_cover,wind_speed_10m,wind_gusts_10m"
 
     async with aiohttp.ClientSession() as session:
         async with session.get(api_url) as response:

@@ -1,13 +1,16 @@
 from __future__ import annotations
-from typing import Awaitable, Callable, TYPE_CHECKING, TypeAlias
-from dataclasses import dataclass, field
-from typed_json import JSON, JSONDict
-from abc import ABC, abstractmethod
-from pathlib import Path
+
 import logging
-from collections import defaultdict
-from openai import AsyncOpenAI
 from asyncio import AbstractEventLoop
+from collections import defaultdict
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import TYPE_CHECKING, TypeAlias
+
+from openai import AsyncOpenAI
+
+from typed_json import JSON, JSONDict
 
 if TYPE_CHECKING:
     import discord
@@ -91,7 +94,7 @@ class GlobalContext:
     send_discord_message: DiscordSendFn | None = None
 
     discord_loop: AbstractEventLoop | None = None
-    discord_client: "discord.Client | None" = None
+    discord_client: discord.Client | None = None
     _db_initialized: bool = False
     _indexer_last_sync_ts: float = 0.0
     _indexer_last_search_ts: float = 0.0

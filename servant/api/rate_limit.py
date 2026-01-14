@@ -29,7 +29,7 @@ class RateLimiter:
         min_interval_s: float | None = None,
         max_calls: int | None = None,
         period_s: float = 60.0,
-    ) -> "RateLimiter | None":
+    ) -> RateLimiter | None:
         if min_interval_s is None and qps is not None:
             try:
                 qps_val = float(qps)
