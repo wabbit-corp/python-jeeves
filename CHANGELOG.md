@@ -12,9 +12,16 @@ The entries below are derived from the git history and grouped by release date.
 - CODI auto-annotation tooling (`servant/modules/codi_auto_annotator.py`, `servant/scripts/codi_auto_annotate.py`).
 - CODI training export script from the indexer database (`servant/scripts/export_codi_training.py`).
 - Local type stubs for emoji/imblearn/sklearn to improve type checking.
+- Python QA runner `check.py` mirroring `check.sh` output and behavior.
+- Import-linter contracts and coverage configuration in `pyproject.toml`.
 ### Changed
-- QA runner `check.sh` now captures per-tool logs, runs coverage/diff-cover, and prints a summary.
+- QA runner `check.sh` now strips OSC/CSI sequences in logs, runs import-linter when available, and improves diff-cover/coverage summaries.
 - CODI/Servant JSON parsing tightened with `typed_json` coercion across models and views.
+- Pyright now reports import cycles as errors.
+### Fixed
+- Broke CODI import cycles by moving community serialization into the model layer and using lightweight protocol types.
+- Centralized disentanglement feature registration/extraction to avoid feature module circular imports.
+- Tightened Brave Search tests to satisfy type checking and import ordering.
 
 ## [2026-01-14]
 ### Added
