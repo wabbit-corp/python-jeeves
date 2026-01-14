@@ -2,15 +2,11 @@ from __future__ import annotations
 
 import builtins
 import re
-from typing import TYPE_CHECKING
 
 from typed_json import JSONDict, coerce_str
 
 from .entity import Entity
-
-if TYPE_CHECKING:
-    from .community import Community
-    from .message import Message
+from .protocols import CommunityRef, MessageRef
 
 
 class Member(Entity):
@@ -21,7 +17,7 @@ class Member(Entity):
     def __init__(self) -> None:
         super().__init__()
         self._username: str | None = None
-        self._community: Community | None = None
+        self._community: CommunityRef | None = None
 
     def _get_username(self) -> str:
         """
@@ -38,7 +34,13 @@ class Member(Entity):
         """
         self._username = username
 
-    username = builtins.property(_get_username, _set_username)
+    @property
+    def username(self) -> str:
+        return self._get_username()
+
+    @username.setter
+    def username(self, value: str) -> None:
+        self._set_username(value)
 
     @builtins.property
     def cleaned_username(self) -> str:
@@ -46,14 +48,14 @@ class Member(Entity):
         name = re.sub(r"[^A-z]", "", name)
         return name.capitalize().encode("ascii", "ignore").decode("ascii")
 
-    def _get_community(self) -> Community:
+    def _get_community(self) -> CommunityRef:
         """
         :type: Community
         """
         assert self._community is not None
         return self._community
 
-    def _set_community(self, community: Community) -> None:
+    def _set_community(self, community: CommunityRef) -> None:
         """
         Set the community of the member.
 
@@ -61,9 +63,15 @@ class Member(Entity):
         """
         self._community = community
 
-    community = builtins.property(_get_community, _set_community)
+    @property
+    def community(self) -> CommunityRef:
+        return self._get_community()
 
-    def deserialize(self, data: JSONDict, community: Community | None = None) -> Member:
+    @community.setter
+    def community(self, value: CommunityRef) -> None:
+        self._set_community(value)
+
+    def deserialize(self, data: JSONDict, community: CommunityRef | None = None) -> Member:
         """
         Deserialize the data into a Member object.
 
@@ -84,15 +92,15 @@ class Author(Member):
 
     def __init__(self) -> None:
         super().__init__()
-        self._messages: list[Message] = []
+        self._messages: list[MessageRef] = []
 
-    def _get_messages(self) -> list[Message]:
+    def _get_messages(self) -> list[MessageRef]:
         """
         :type: [Message]
         """
         return self._messages
 
-    def _set_messages(self, messages: list[Message]) -> None:
+    def _set_messages(self, messages: list[MessageRef]) -> None:
         """
         Set the messages of the author.
 

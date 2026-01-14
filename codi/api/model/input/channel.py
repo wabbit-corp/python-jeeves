@@ -2,18 +2,15 @@ from __future__ import annotations
 
 import builtins
 import re
+from collections.abc import Mapping
 from datetime import datetime
-from typing import TYPE_CHECKING
 
 from typed_json import JSONDict, coerce_str, require_obj
 
 from .entity import Entity
 from .message import Message
+from .protocols import CommunityRef, MemberRef
 from .topic import Topic
-
-if TYPE_CHECKING:
-    from .community import Community
-    from .member import Member
 
 
 class Channel(Entity):
@@ -24,7 +21,7 @@ class Channel(Entity):
     def __init__(self) -> None:
         super().__init__()
         self._path: str | None = None
-        self._community: Community | None = None
+        self._community: CommunityRef | None = None
         self._topics: list[Topic] = []
         self._messages: dict[str, Message] = {}
 
@@ -43,16 +40,22 @@ class Channel(Entity):
         """
         self._path = path
 
-    path = builtins.property(_get_path, _set_path)
+    @property
+    def path(self) -> str:
+        return self._get_path()
 
-    def _get_community(self) -> Community:
+    @path.setter
+    def path(self, value: str) -> None:
+        self._set_path(value)
+
+    def _get_community(self) -> CommunityRef:
         """
         :type: Community
         """
         assert self._community is not None
         return self._community
 
-    def _set_community(self, community: Community) -> None:
+    def _set_community(self, community: CommunityRef) -> None:
         """
         Set the community of the channel.
 
@@ -60,7 +63,13 @@ class Channel(Entity):
         """
         self._community = community
 
-    community = builtins.property(_get_community, _set_community)
+    @property
+    def community(self) -> CommunityRef:
+        return self._get_community()
+
+    @community.setter
+    def community(self, value: CommunityRef) -> None:
+        self._set_community(value)
 
     def _get_topics(self) -> list[Topic]:
         """
@@ -97,8 +106,8 @@ class Channel(Entity):
     def deserialize(
         self,
         data: JSONDict,
-        members: dict[str, Member] | None = None,
-        community: Community | None = None,
+        members: Mapping[str, MemberRef] | None = None,
+        community: CommunityRef | None = None,
     ) -> Channel:
         """
         Deserialize a channel into a Channel object.

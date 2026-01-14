@@ -2,14 +2,11 @@ from __future__ import annotations
 
 import builtins
 import re
-from typing import TYPE_CHECKING
+from collections.abc import Mapping, MutableMapping
 
 from .content import Content
 from .member import Member
-
-if TYPE_CHECKING:
-    from .channel import Channel
-    from .message import Message
+from .protocols import ChannelRef, MessageRef
 
 
 class Mention(Content):
@@ -53,7 +50,7 @@ class MemberMention(Mention):
         self,
         start_position: int,
         end_position: int,
-        message: Message | None = None,
+        message: MessageRef | None = None,
         value: str | None = None,
         *,
         members: dict[str, Member] | None = None,
@@ -95,7 +92,7 @@ class MemberMention(Mention):
         cls,
         members: dict[str, Member],
         message: str,
-        message_obj: Message | None = None,
+        message_obj: MessageRef | None = None,
     ) -> tuple[list[MemberMention], str]:
         """
         Retrieve the list of member mentions in a message.
@@ -135,7 +132,7 @@ class SlackMemberMention(MemberMention):
         self,
         start_position: int,
         end_position: int,
-        message: Message | None = None,
+        message: MessageRef | None = None,
         value: str | None = None,
         *,
         members: dict[str, Member] | None = None,
@@ -169,7 +166,7 @@ class SlackMemberMention(MemberMention):
         cls,
         members: dict[str, Member],
         message: str,
-        message_obj: Message | None = None,
+        message_obj: MessageRef | None = None,
     ) -> tuple[list[MemberMention], str]:
         """
         Retrieve the list of Slack member mentions in a message.
@@ -209,19 +206,19 @@ class ChannelMention(Mention):
 
     def __init__(self) -> None:
         super().__init__()
-        self._channel: Channel | None = None
+        self._channel: ChannelRef | None = None
 
     def __str__(self, content: str | None = None) -> str:
         return super().__str__(self.channel.path)
 
-    def _get_channel(self) -> Channel:
+    def _get_channel(self) -> ChannelRef:
         """
         :type: Channel
         """
         assert self._channel is not None
         return self._channel
 
-    def _set_channel(self, channel: Channel) -> None:
+    def _set_channel(self, channel: ChannelRef) -> None:
         """
         Set the channel of this mention.
 
@@ -235,13 +232,13 @@ class ChannelMention(Mention):
         self,
         start_position: int,
         end_position: int,
-        message: Message | None = None,
+        message: MessageRef | None = None,
         value: str | None = None,
         *,
-        channels: dict[str, Channel] | None = None,
+        channels: Mapping[str, ChannelRef] | None = None,
         channel_id: str | None = None,
         channel_name: str | None = None,
-        uninitialized_channels: dict[str, Channel] | None = None,
+        uninitialized_channels: MutableMapping[str, ChannelRef] | None = None,
     ) -> ChannelMention:
         """
         Deserialize a mention into a ChannelMention object.
@@ -261,13 +258,12 @@ class ChannelMention(Mention):
         try:
             self._channel = channels[channel_id]
         except KeyError as exc:
-            from .channel import Channel
-
             if uninitialized_channels is None:
                 raise ValueError("Channel mention requires uninitialized_channels when channel is missing.") from exc
             if message is None:
                 raise ValueError("Channel mention requires message when channel is missing.") from exc
-            new_channel = Channel()
+            new_channel_type = type(message.channel)
+            new_channel = new_channel_type()
             new_channel.uuid = channel_id
             new_channel.path = channel_name or channel_id
             new_channel.community = message.channel.community
@@ -280,10 +276,10 @@ class ChannelMention(Mention):
     @classmethod
     def retrieve(
         cls,
-        channels: dict[str, Channel],
+        channels: Mapping[str, ChannelRef],
         message: str,
-        uninitialized_channels: dict[str, Channel],
-        message_obj: Message | None = None,
+        uninitialized_channels: MutableMapping[str, ChannelRef],
+        message_obj: MessageRef | None = None,
     ) -> tuple[list[ChannelMention], str]:
         """
         Retrieve the list of channel mentions from a message.
@@ -325,13 +321,13 @@ class SlackChannelMention(ChannelMention):
         self,
         start_position: int,
         end_position: int,
-        message: Message | None = None,
+        message: MessageRef | None = None,
         value: str | None = None,
         *,
-        channels: dict[str, Channel] | None = None,
+        channels: Mapping[str, ChannelRef] | None = None,
         channel_id: str | None = None,
         channel_name: str | None = None,
-        uninitialized_channels: dict[str, Channel] | None = None,
+        uninitialized_channels: MutableMapping[str, ChannelRef] | None = None,
     ) -> SlackChannelMention:
         """
         Deserialize a mention into a ChannelMention object.
@@ -360,10 +356,10 @@ class SlackChannelMention(ChannelMention):
     @classmethod
     def retrieve(
         cls,
-        channels: dict[str, Channel],
+        channels: Mapping[str, ChannelRef],
         message: str,
-        uninitialized_channels: dict[str, Channel],
-        message_obj: Message | None = None,
+        uninitialized_channels: MutableMapping[str, ChannelRef],
+        message_obj: MessageRef | None = None,
     ) -> tuple[list[ChannelMention], str]:
         """
         Retrieve the list of channel mentions from a message.

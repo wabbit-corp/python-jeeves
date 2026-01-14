@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import builtins
-
 from typed_json import JSONDict, coerce_str
 
 
@@ -25,7 +23,13 @@ class Entity:
         """
         self._uuid = value
 
-    uuid = builtins.property(_get_uuid, _set_uuid)
+    @property
+    def uuid(self) -> str:
+        return self._get_uuid()
+
+    @uuid.setter
+    def uuid(self, value: str) -> None:
+        self._set_uuid(value)
 
     def deserialize(self, data: JSONDict) -> Entity:
         """

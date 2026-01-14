@@ -92,35 +92,6 @@ class Feature:
         return collection
 
     @staticmethod
-    def get_default_features() -> list[type[Feature]]:
-        """
-        Get the default features to be extracted from the message.
-
-        :return: The default features list
-        """
-        from ..disentanglement.chat import CrossAuthorMention, HasMention, MentionOther, MentionSame, Speaker, Time
-        from ..disentanglement.content import ContainsCode, ContainsLink, Repeat, Tech
-        from ..disentanglement.discourse import CueWords, Greet, Long, Question, Thanks
-
-        return [
-            Repeat,
-            Tech,
-            ContainsCode,
-            ContainsLink,
-            CueWords,
-            Question,
-            Long,
-            Greet,
-            Thanks,
-            Time,
-            Speaker,
-            CrossAuthorMention,
-            MentionSame,
-            MentionOther,
-            HasMention,
-        ]
-
-    @staticmethod
     def get_group_features() -> list[type[Feature]]:
         raise NotImplementedError
 
@@ -137,30 +108,4 @@ class Feature:
         hyper_params: dict[str, str],
         unigram_probabilities: dict[str, float],
     ) -> list[Feature]:
-        """
-        Extract the features -- given by feature_type_list -- of a pair of messages.
-
-        :param message_1: The first message of the pair
-        :param message_2: The second message of the pair
-        :param features_type_list: The list of types of features to extract
-        :param hyper_params: The hyperparameters' dictionary
-        :param unigram_probabilities: The unigram probabilities of the words in the community
-        :return: The feature vector of the pair of messages
-        """
-        from .chat import Time
-        from .content import Repeat
-        from .discourse import Long
-
-        features: list[Feature] = []
-
-        for feature_type in features_type_list:
-            if feature_type == Time:
-                features.append(Time.extract(message_1, message_2, int(hyper_params["chat bins"])))
-            elif feature_type == Long:
-                features.append(Long.extract(message_1, message_2, int(hyper_params["discourse max words"])))
-            elif feature_type == Repeat:
-                features.append(Repeat.extract(message_1, message_2, unigram_probabilities))
-            else:
-                features.append(feature_type.extract(message_1, message_2))
-
-        return features
+        raise NotImplementedError

@@ -1,9 +1,11 @@
 import asyncio
 
-from hypothesis import given, strategies as st
+from hypothesis import given
+from hypothesis import strategies as st
 
 from servant.defs import GlobalContext
 from servant.modules import bravesearch
+from typed_json import JSON, JSONDict
 
 
 @given(st.integers(min_value=-100, max_value=100))
@@ -27,7 +29,9 @@ def test_clamp_num_results_defaults_for_none() -> None:
     st.integers(min_value=0, max_value=20),
 )
 def test_extract_results_truncates_lists(web_items: list[int], news_items: list[int], limit: int) -> None:
-    data = {"web": {"results": web_items}, "news": news_items}
+    web_results: list[JSON] = [item for item in web_items]
+    news_results: list[JSON] = [item for item in news_items]
+    data: JSONDict = {"web": {"results": web_results}, "news": news_results}
     results = bravesearch._extract_results(data, limit)
 
     assert results["web"] == web_items[:limit]

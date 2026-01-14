@@ -2,12 +2,10 @@ from __future__ import annotations
 
 import builtins
 import re
-from typing import TYPE_CHECKING
 
 import emoji
 
-if TYPE_CHECKING:
-    from .message import Message
+from .protocols import MessageRef
 
 
 class Content:
@@ -18,7 +16,7 @@ class Content:
     def __init__(self) -> None:
         self._start_position: int | None = None
         self._end_position: int | None = None
-        self._message: Message | None = None
+        self._message: MessageRef | None = None
 
     def __repr__(self) -> str:
         return self.__str__()
@@ -60,14 +58,14 @@ class Content:
 
     end_position = builtins.property(_get_end_position, _set_end_position)
 
-    def _get_message(self) -> Message:
+    def _get_message(self) -> MessageRef:
         """
         :type: str
         """
         assert self._message is not None
         return self._message
 
-    def _set_message(self, message: Message) -> None:
+    def _set_message(self, message: MessageRef) -> None:
         """
         Set the message.
 
@@ -81,7 +79,7 @@ class Content:
         self,
         start_position: int,
         end_position: int,
-        message: Message | None = None,
+        message: MessageRef | None = None,
         value: str | None = None,
     ) -> Content:
         self._start_position = start_position
@@ -123,7 +121,7 @@ class Text(Content):
         self,
         start_position: int,
         end_position: int,
-        message: Message | None = None,
+        message: MessageRef | None = None,
         value: str | None = None,
     ) -> Text:
         """
@@ -145,7 +143,7 @@ class Text(Content):
         cls,
         message: str,
         contents: list[Content],
-        message_obj: Message | None = None,
+        message_obj: MessageRef | None = None,
     ) -> list[Text]:
         """
         Retrieve a list of text blocks from a message.
@@ -219,7 +217,7 @@ class Link(Content):
         self,
         start_position: int,
         end_position: int,
-        message: Message | None = None,
+        message: MessageRef | None = None,
         value: str | None = None,
     ) -> Link:
         """
@@ -240,7 +238,7 @@ class Link(Content):
     def retrieve(
         cls,
         message: str,
-        message_obj: Message | None = None,
+        message_obj: MessageRef | None = None,
     ) -> tuple[list[Link], str]:
         """
         Retrieve the list of links from a message text.
@@ -298,7 +296,7 @@ class Code(Content):
         self,
         start_position: int,
         end_position: int,
-        message: Message | None = None,
+        message: MessageRef | None = None,
         value: str | None = None,
     ) -> Code:
         """
@@ -319,7 +317,7 @@ class Code(Content):
     def retrieve(
         cls,
         message: str,
-        message_obj: Message | None = None,
+        message_obj: MessageRef | None = None,
     ) -> tuple[list[Code], str]:
         """
         Retrieve the list of code blocks in a message.
@@ -372,7 +370,7 @@ class Multimedia(Content):
         self,
         start_position: int,
         end_position: int,
-        message: Message | None = None,
+        message: MessageRef | None = None,
         value: str | None = None,
     ) -> Multimedia:
         """
@@ -393,7 +391,7 @@ class Multimedia(Content):
     def retrieve(
         cls,
         message: str,
-        message_obj: Message | None = None,
+        message_obj: MessageRef | None = None,
     ) -> tuple[list[Multimedia], str]:
         """
         Retrieve the list of multimedia elements in a message.
@@ -466,7 +464,7 @@ class Emoji(Content):
         self,
         start_position: int,
         end_position: int,
-        message: Message | None = None,
+        message: MessageRef | None = None,
         value: str | None = None,
     ) -> Emoji:
         """
@@ -487,7 +485,7 @@ class Emoji(Content):
     def retrieve(
         cls,
         message: str,
-        message_obj: Message | None = None,
+        message_obj: MessageRef | None = None,
     ) -> tuple[list[Emoji], str]:
         """
         Retrieve the list of unicode strings in a message.

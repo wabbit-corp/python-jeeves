@@ -59,3 +59,44 @@ testpaths = ["tests", "codi/api/tests"]
 
 [tool.deptry]
 per_rule_ignores = { "DEP002" = ["hypothesis"] }
+
+[tool.importlinter]
+root_packages = ["codi", "servant", "typed_json"]
+
+# Enforce that siblings under these ancestors don't form cycles
+[[tool.importlinter.contracts]]
+id = "no-sibling-cycles"
+name = "No dependency cycles between sibling packages"
+type = "acyclic_siblings"
+ancestors = ["codi", "servant"]
+depth = 10
+
+# Optional: enforce a strict layering (example)
+[[tool.importlinter.contracts]]
+id = "layering"
+name = "Layered architecture"
+type = "layers"
+layers = [
+  "servant",
+  "codi",
+  "typed_json",
+]
+
+[tool.coverage.run]
+branch = true
+source = ["codi", "servant", "typed_json"]
+omit = [
+  "tests/*",
+  "codi/api/tests/*",
+  ".venv/*",
+  "**/__pycache__/*",
+]
+
+[tool.coverage.report]
+show_missing = true
+skip_empty = true
+fail_under = 80
+precision = 0
+
+[tool.coverage.xml]
+output = "coverage.xml"

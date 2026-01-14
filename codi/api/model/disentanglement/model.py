@@ -22,8 +22,8 @@ from typed_json import JSONDict
 
 from ...utils.compute_statistics import Statistics, f_score, micro_averaged_f_score_labels
 from ...utils.decorators import measure_time
-from ...utils.serialize_community import serialize_community
 from ..disentanglement.feature import Feature
+from ..disentanglement.feature_registry import get_default_features, get_features
 from ..input.channel import Channel
 from ..input.community import Community
 from ..input.message import Message
@@ -251,7 +251,7 @@ class Model:
         feature_matrix: list[list[Feature]] = []
 
         for pair in tqdm.tqdm(pairs, desc="Extracting features"):
-            feat_vec = Feature.get_features(
+            feat_vec = get_features(
                 pair.message1, pair.message2, features, self._hyperparameters, unigram_probabilities
             )
             feature_matrix.append([feature for feature in feat_vec])
@@ -483,11 +483,12 @@ class Model:
 
             else:
                 new_convo = Conversation()
-                new_convo.uuid = len(conversations) + 1
+                new_id = len(conversations) + 1
+                new_convo.uuid = str(new_id)
                 new_convo.messages.append(message)
 
                 conversations.append(new_convo)
-                self._pred_conversations.append(new_convo.uuid)
+                self._pred_conversations.append(new_id)
 
                 # if is_last:
                 #     messages_modified[message].conversation = f'T{new_convo.uuid}'
@@ -599,7 +600,7 @@ class Model:
         :return: The trained model
         """
         if features is None:
-            features = Feature.get_default_features()
+            features = get_default_features()
 
         for channel in training_set.channels.values():
             if len(channel.messages) > 0:
@@ -643,10 +644,10 @@ class Model:
         predictions: Sequence[int] = []
 
         self._pred_conversations = []
-        gold: JSONDict = serialize_community(community)
+        gold: JSONDict = community.serialize()
 
         if features is None:
-            features = Feature.get_default_features()
+            features = get_default_features()
 
         if not validation and not retrain and self._trained_model is None:
             raise RuntimeError(

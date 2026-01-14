@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import builtins
 import re
+from collections.abc import Mapping, MutableMapping
 from datetime import datetime
-from typing import TYPE_CHECKING
 from webbrowser import open
 
 from dateutil.parser import parse
@@ -15,9 +15,7 @@ from .content import Code, Content, Emoji, Link, Multimedia, Text
 from .entity import Entity
 from .member import Author, Member
 from .mention import ChannelMention, MemberMention, SlackChannelMention, SlackMemberMention
-
-if TYPE_CHECKING:
-    from .channel import Channel
+from .protocols import ChannelRef
 
 
 class Message(Entity):
@@ -29,7 +27,7 @@ class Message(Entity):
         super().__init__()
         self._text: str | None = None
         self._author: Author | None = None
-        self._channel: Channel | None = None
+        self._channel: ChannelRef | None = None
         self._timestamp: datetime | int | None = None
         self._original_text: str | None = None
         self._processable_text: str | None = None
@@ -117,14 +115,14 @@ class Message(Entity):
 
     author = builtins.property(_get_author, _set_author)
 
-    def _get_channel(self) -> Channel:
+    def _get_channel(self) -> ChannelRef:
         """
         :type: Channel
         """
         assert self._channel is not None
         return self._channel
 
-    def _set_channel(self, channel: Channel) -> None:
+    def _set_channel(self, channel: ChannelRef) -> None:
         """
         Set the channel of the message.
 
@@ -132,7 +130,13 @@ class Message(Entity):
         """
         self._channel = channel
 
-    channel = builtins.property(_get_channel, _set_channel)
+    @property
+    def channel(self) -> ChannelRef:
+        return self._get_channel()
+
+    @channel.setter
+    def channel(self, value: ChannelRef) -> None:
+        self._set_channel(value)
 
     def _get_contents(self) -> list[Content]:
         """
@@ -218,8 +222,8 @@ class Message(Entity):
         self,
         data: JSONDict,
         members: dict[str, Member] | None = None,
-        channels: dict[str, Channel] | None = None,
-        uninitialized_channels: dict[str, Channel] | None = None,
+        channels: Mapping[str, ChannelRef] | None = None,
+        uninitialized_channels: MutableMapping[str, ChannelRef] | None = None,
         authors: dict[str, Author] | None = None,
         platform: str | None = None,
     ) -> Message:

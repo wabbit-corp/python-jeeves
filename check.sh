@@ -74,6 +74,14 @@ cmd = sys.argv[3:]
 
 ansi_re = re.compile(rb"\x1b\[[0-9;]*[A-Za-z]")
 
+csi = re.compile(rb"\x1b\[[0-9;?]*[ -/]*[@-~]")
+osc = re.compile(rb"\x1b\][^\x1b]*\x1b\\")  # OSC ... ST
+
+def strip_ansi(b: bytes) -> bytes:
+  b = osc.sub(b"", b)
+  b = csi.sub(b"", b)
+  return b
+
 master_fd, slave_fd = pty.openpty()
 proc = subprocess.Popen(cmd, stdin=slave_fd, stdout=slave_fd, stderr=slave_fd, close_fds=True)
 os.close(slave_fd)
@@ -82,7 +90,7 @@ def write_log(fh, chunk: bytes) -> None:
   if keep_ansi:
     fh.write(chunk)
   else:
-    fh.write(ansi_re.sub(b"", chunk))
+    fh.write(strip_ansi(chunk))
 
 with open(log_path, "wb") as f:
   try:
@@ -150,6 +158,18 @@ extract_counts() {
         errors="$(grep -E 'would reformat ' "$log" 2>/dev/null | wc -l | tr -d ' ')"
       fi
       ;;
+    "import-linter")
+      # Prefer the explicit summary: "Contracts: 1 kept, 1 broken."
+      local broken
+      broken="$(sed -nE 's/.*Contracts: [0-9]+ kept, ([0-9]+) broken.*/\1/p' "$log" | tail -n1 || true)"
+      if [[ -n "${broken:-}" && "$broken" =~ ^[0-9]+$ ]]; then
+        errors="$broken"
+      else
+        # Fallback: count BROKEN labels
+        errors="$(grep -cE '\bBROKEN\b' "$log" 2>/dev/null | tr -d ' ')"
+      fi
+      ;;
+
     "mypy")
       local n
       n="$(grep -Eo 'Found [0-9]+ errors?' "$log" 2>/dev/null | tail -n1 | awk '{print $2}' || true)"
@@ -231,15 +251,32 @@ extract_counts() {
       fi
       ;;
     "diff-cover")
-      # diff-cover output formats vary. Best cheap heuristic: count "Missing" lines.
-      warnings="$(grep -iE '\bmissing\b' "$log" 2>/dev/null | wc -l | tr -d ' ')"
+      local miss
+      miss="$(grep -Eo 'Missing: [0-9]+ lines' "$log" 2>/dev/null | tail -n1 | awk '{print $2}' || true)"
+      if [[ -n "${miss:-}" && "$miss" =~ ^[0-9]+$ ]]; then
+        warnings="$miss"   # treat missing lines as "warnings" metric
+      else
+        # Fallback: number of file entries listing missing lines
+        warnings="$(grep -cE 'Missing lines' "$log" 2>/dev/null | tr -d ' ')"
+      fi
+
+      # If diff-cover reports failure, count it as an error event.
+      if grep -qiE '^Failure\.|Coverage is below' "$log" 2>/dev/null; then
+        errors=1
+      fi
       ;;
     "coverage report")
-      # coverage prints "TOTAL ... XX%"
       local pct
-      pct="$(grep -E 'TOTAL[[:space:]]+[0-9]+' "$log" 2>/dev/null | tail -n1 | awk '{print $(NF-1)}' | tr -d '%' || true)"
-      if [[ -n "${pct:-}" && "$pct" =~ ^[0-9]+$ ]]; then
-        if (( pct < COVERAGE_FAIL_UNDER )); then
+      pct="$(awk '/^TOTAL[[:space:]]/ {gsub(/%/, "", $NF); print $NF}' "$log" | tail -n1 || true)"
+      if [[ -n "${pct:-}" && "$pct" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
+        # Compare as integer (coverage usually prints whole % anyway)
+        local ipct="${pct%.*}"
+        if (( ipct < COVERAGE_FAIL_UNDER )); then
+          errors=1
+        fi
+      else
+        # Fallback: explicit failure line
+        if grep -qE 'Coverage failure:' "$log" 2>/dev/null; then
           errors=1
         fi
       fi
@@ -374,6 +411,20 @@ print_summary() {
 # Force color where possible; PTY already helps, but this avoids some tool weirdness.
 run_tool "ruff" "ruff" "Install: $PYTHON -m pip install ruff" check "$TARGET"
 run_tool "black --check" "black" "Install: $PYTHON -m pip install black" --check "$TARGET"
+
+
+# import-linter (lint-imports)
+if [[ -x "$BIN/lint-imports" ]]; then
+  # Optional override: set IMPORTLINTER_CONFIG=/path/to/.importlinter
+  if [[ -n "${IMPORTLINTER_CONFIG:-}" ]]; then
+    run_cmd "import-linter" "$BIN/lint-imports" --config "$IMPORTLINTER_CONFIG"
+  else
+    run_cmd "import-linter" "$BIN/lint-imports"
+  fi
+else
+  missing "import-linter" "Install: $PYTHON -m pip install import-linter"
+fi
+
 run_tool "mypy" "mypy" "Install: $PYTHON -m pip install mypy" "$TARGET"
 
 if [[ -x "$BIN/basedpyright" ]]; then

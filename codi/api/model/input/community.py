@@ -2,18 +2,22 @@ from __future__ import annotations
 
 import builtins
 import configparser
+import datetime
 import json
 import os
 import pickle
+from collections.abc import MutableMapping
 from typing import TYPE_CHECKING
 
 from typed_json import JSON, JSONDict, coerce_str, obj_to_json, require_obj
 
-from ...utils.serialize_community import serialize_community
 from .channel import Channel
+from .content import Code, Emoji, Link, Multimedia, Text
 from .entity import Entity
 from .member import Author, Member
+from .mention import ChannelMention, MemberMention
 from .message import Message
+from .protocols import ChannelRef
 
 if TYPE_CHECKING:
     from ...utils.compute_statistics import Statistics
@@ -117,7 +121,13 @@ class Community(Entity):
         """
         self._authors = authors
 
-    authors = builtins.property(_get_authors, _set_authors)
+    @property
+    def authors(self) -> dict[str, Author]:
+        return self._get_authors()
+
+    @authors.setter
+    def authors(self, value: dict[str, Author]) -> None:
+        self._set_authors(value)
 
     def _save(self) -> None:
         """
@@ -143,6 +153,26 @@ class Community(Entity):
         with open(os.path.join(path, f"./{self._name}.pickle"), "wb") as f:
             pickle.dump(self, f)
 
+    def serialize(self) -> JSONDict:
+        members: list[JSON] = []
+        authors: list[JSON] = []
+        channels: list[JSON] = []
+
+        out: JSONDict = {
+            "platform": self.platform,
+            "id": self.uuid,
+            "name": self.name,
+            "members": members,
+            "authors": authors,
+            "channels": channels,
+        }
+
+        _serialize_members(self, members)
+        _serialize_authors(self, authors)
+        _serialize_channels(self, channels)
+
+        return out
+
     def save_json(
         self,
         op_type: int,
@@ -159,7 +189,7 @@ class Community(Entity):
         :param statistics: The statistics of the prediction or validation
         :param gold: It is the gold set of conversations used in validation
         """
-        community_mod = serialize_community(self)
+        community_mod = self.serialize()
         path = os.path.join(os.path.dirname(__file__), "../../training/tmp/json")
 
         if gold:
@@ -214,7 +244,7 @@ class Community(Entity):
         :return: The deserialized community
         """
         authors: dict[str, Author] = {}
-        uninitialized_channels: dict[str, Channel] = {}
+        uninitialized_channels: MutableMapping[str, ChannelRef] = {}
         self._platform = coerce_str(request.get("platform"), field="platform").lower()
         self._uuid = coerce_str(request.get("id"), field="id")
         self._name = coerce_str(request.get("name"), field="name").lower().replace(" ", "-")
@@ -256,7 +286,10 @@ class Community(Entity):
 
         # Merge authors and uninitialized channels into the community authors and channels respectively
         self._authors |= authors
-        self._channels |= uninitialized_channels
+        for channel_id, pending_channel in uninitialized_channels.items():
+            if not isinstance(pending_channel, Channel):
+                raise ValueError("Uninitialized channels must be Channel instances.")
+            self._channels[channel_id] = pending_channel
 
         self._save()
 
@@ -269,3 +302,109 @@ class Community(Entity):
         with open(filename) as file:
             community = json.load(file)
             self.deserialize(community)
+
+
+def _serialize_members(community: Community, members: list[JSON]) -> None:
+    for member in community.members:
+        members.append({"id": community.members[member].uuid, "name": community.members[member].username})
+
+
+def _serialize_authors(community: Community, authors: list[JSON]) -> None:
+    for author in community.authors:
+        authors.append(
+            {
+                "id": community.authors[author].uuid,
+                "name": community.authors[author].username,
+                "messagesIds": [message.uuid for message in community.members[author].messages],
+            }
+        )
+
+
+def _serialize_channels(community: Community, channels: list[JSON]) -> None:
+    for channel in community.channels:
+        channels.append(
+            {
+                "id": community.channels[channel].uuid,
+                "path": community.channels[channel].path,
+                "topics": _serialize_topics(community.channels[channel]),
+                "messages": _serialize_messages(community.channels[channel]),
+            }
+        )
+
+
+def _serialize_topics(channel: Channel) -> list[JSON]:
+    topics: list[JSON] = []
+
+    for topic in channel.topics:
+        topics.append({"description": topic.description, "keywords": topic.keywords})
+
+    return topics
+
+
+def _serialize_messages(channel: Channel) -> list[JSON]:
+    messages: list[JSON] = []
+
+    for message in channel.messages.values():
+        if not isinstance(message.timestamp, int):
+            timestamp = datetime.datetime.timestamp(message.timestamp)
+        else:
+            timestamp = message.timestamp
+
+        messages.append(
+            {
+                "id": message.uuid,
+                "authorId": message.author.uuid,
+                "author_username": message.author.username,
+                "timestamp": timestamp,
+                "conversationId": message.conversation,
+                "processable_text": message.processable_text,
+                "text": message.text,
+                "attachments": _serialize_attachments(message),
+                "content": _serialize_contents(message),
+            }
+        )
+
+    return messages
+
+
+def _serialize_attachments(message: Message) -> list[JSON]:
+    attachments: list[JSON] = []
+
+    for attachment in message.attachments:
+        attachments.append(
+            {
+                "urls": attachment.url,
+            }
+        )
+
+    return attachments
+
+
+def _serialize_contents(message: Message) -> list[JSON]:
+    contents: list[JSON] = []
+
+    for content in message.contents:
+        content_entry: JSONDict = {
+            "type": str(content.__class__.__name__).lower(),
+            "start_position": content.start_position,
+            "end_position": content.end_position,
+        }
+
+        if isinstance(content, Text):
+            content_entry["text"] = content.text
+        elif isinstance(content, Link) or isinstance(content, Multimedia):
+            content_entry["urls"] = content.url
+        elif isinstance(content, Emoji):
+            content_entry["unicode"] = content.unicode
+        elif isinstance(content, Code):
+            content_entry["code"] = content.code
+        elif isinstance(content, MemberMention):
+            content_entry["memberId"] = content.member.uuid
+            message.text = message.text.replace("__MEMBER_MENTION__", f"{content.member.username}:", 1)
+        elif isinstance(content, ChannelMention):
+            content_entry["channelId"] = content.channel.uuid
+            message.text = message.text.replace("__CHANNEL_MENTION__", f"{content.channel.path}:", 1)
+
+        contents.append(content_entry)
+
+    return contents

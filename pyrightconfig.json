@@ -15,5 +15,6 @@
   "reportMissingTypeStubs": "none",
   "reportMissingImports": "none",
   "reportUndefinedVariable": "error",
-  "reportUnboundVariable": "error"
+  "reportUnboundVariable": "error",
+  "reportImportCycles": "error"
 }

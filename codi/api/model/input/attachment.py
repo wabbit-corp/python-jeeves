@@ -2,12 +2,10 @@ from __future__ import annotations
 
 import builtins
 from collections.abc import Sequence
-from typing import TYPE_CHECKING
 
 from typed_json import JSONDict, coerce_str
 
-if TYPE_CHECKING:
-    from .message import Message
+from .protocols import MessageRef
 
 
 class Attachment:
@@ -17,7 +15,7 @@ class Attachment:
 
     def __init__(self) -> None:
         self._url: str | None = None
-        self._message: Message | None = None
+        self._message: MessageRef | None = None
 
     def __repr__(self) -> str:
         return self.__str__()
@@ -42,14 +40,14 @@ class Attachment:
 
     url = builtins.property(_get_url, _set_url)
 
-    def _get_message(self) -> Message:
+    def _get_message(self) -> MessageRef:
         """
         :type: Message
         """
         assert self._message is not None
         return self._message
 
-    def _set_message(self, message: Message) -> None:
+    def _set_message(self, message: MessageRef) -> None:
         """
         Set the message of the attachment.
 
@@ -62,7 +60,7 @@ class Attachment:
     def deserialize(
         self,
         url: str | None = None,
-        message: Message | None = None,
+        message: MessageRef | None = None,
     ) -> Attachment:
         """
         Deserialize an attachment into an Attachment object.
@@ -81,7 +79,7 @@ class Attachment:
     def retrieve_attachments(
         cls,
         attachments: Sequence[JSONDict],
-        message: Message | None,
+        message: MessageRef | None,
     ) -> list[Attachment]:
         """
         Retrieve a list of attachments from a dictionary.
