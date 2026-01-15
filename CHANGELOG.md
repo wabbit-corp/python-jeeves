@@ -13,15 +13,21 @@ The entries below are derived from the git history and grouped by release date.
 - CODI training export script from the indexer database (`servant/scripts/export_codi_training.py`).
 - Local type stubs for emoji/imblearn/sklearn to improve type checking.
 - Python QA runner `check.py` mirroring `check.sh` output and behavior.
+- Parser self-tests in `check.py` using captured tool output fixtures.
 - Import-linter contracts and coverage configuration in `pyproject.toml`.
+- Property-based tests for typed_json coercion and CODI mention/content parsing branches.
 ### Changed
+- QA runner entrypoint is now `check.py`; `check.sh` delegates to it.
 - QA runner `check.sh` now strips OSC/CSI sequences in logs, runs import-linter when available, and improves diff-cover/coverage summaries.
+- `check.py` now models tool output with per-tool issue dataclasses and parses JSON output when available.
 - CODI/Servant JSON parsing tightened with `typed_json` coercion across models and views.
 - Pyright now reports import cycles as errors.
+- `check.py` now parses tool output into structured issues and prints normalized findings.
 ### Fixed
 - Broke CODI import cycles by moving community serialization into the model layer and using lightweight protocol types.
 - Centralized disentanglement feature registration/extraction to avoid feature module circular imports.
 - Tightened Brave Search tests to satisfy type checking and import ordering.
+- Updated test typing annotations and emoji stubs to satisfy mypy/pyright, and pointed pyright at the local `.venv`.
 
 ## [2026-01-14]
 ### Added

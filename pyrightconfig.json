@@ -12,6 +12,8 @@
   "stubPath": "stubs",
   "typeCheckingMode": "basic",
   "pythonVersion": "3.10",
+  "venvPath": ".",
+  "venv": ".venv",
   "reportMissingTypeStubs": "none",
   "reportMissingImports": "none",
   "reportUndefinedVariable": "error",

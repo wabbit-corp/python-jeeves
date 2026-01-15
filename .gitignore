@@ -22,3 +22,4 @@ all_memes.json
 /.coverage.*
 coverage.xml
 *.log
+*.bak
