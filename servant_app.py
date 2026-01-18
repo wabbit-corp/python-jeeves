@@ -820,8 +820,6 @@ async def main() -> None:
         async def on_message(self, discord_message: discord.Message) -> None:
             _LOGGER.info(f"Message from {discord_message.author}: {discord_message.content}")
 
-            if discord_message.author == self.user:
-                return
             try:
                 await background_indexer.record_message_create(ctx, discord_message)
             except Exception as e:
@@ -831,6 +829,13 @@ async def main() -> None:
                     e,
                     exc_info=True,
                 )
+
+            if discord_message.guild is not None and str(discord_message.guild.id) == '699975135905710181':
+                return  # Ignore messages from this server
+
+            if discord_message.author == self.user:
+                return
+
             try:
                 await topic_subscriptions.topic_subscriptions_handle_message(ctx, discord_message)
             except Exception:

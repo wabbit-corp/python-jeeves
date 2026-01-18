@@ -1,5 +1,6 @@
 import asyncio
 import datetime as dt
+import sqlite3
 from pathlib import Path
 
 import pytest
@@ -15,6 +16,24 @@ def _ctx_with_db(tmp_path: Path) -> GlobalContext:
     return GlobalContext(secrets={"commitments_db_path": str(tmp_path / "commitments.sqlite3")})
 
 
+def _row_from_dict(columns: dict[str, object]) -> sqlite3.Row:
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    try:
+        column_defs = ", ".join(f"{name} TEXT" for name in columns)
+        conn.execute(f"CREATE TABLE t ({column_defs});")
+        placeholders = ", ".join("?" for _ in columns)
+        conn.execute(
+            f"INSERT INTO t ({', '.join(columns)}) VALUES ({placeholders});",
+            tuple(columns.values()),
+        )
+        row: sqlite3.Row = conn.execute("SELECT * FROM t").fetchone()
+        assert row is not None
+        return row
+    finally:
+        conn.close()
+
+
 @given(st.integers(min_value=-(10**12), max_value=10**12))
 def test_parse_epoch_ms_accepts_int(value: int) -> None:
     assert commitment._parse_epoch_ms(value) == value
@@ -23,6 +42,16 @@ def test_parse_epoch_ms_accepts_int(value: int) -> None:
 @given(st.integers(min_value=-(10**12), max_value=10**12))
 def test_parse_epoch_ms_accepts_numeric_string(value: int) -> None:
     assert commitment._parse_epoch_ms(str(value)) == value
+
+
+@given(st.floats(min_value=-(10**9), max_value=10**9, allow_nan=False, allow_infinity=False))
+def test_parse_epoch_ms_accepts_float(value: float) -> None:
+    assert commitment._parse_epoch_ms(value) == int(value)
+
+
+@given(st.booleans())
+def test_parse_epoch_ms_accepts_bool(value: bool) -> None:
+    assert commitment._parse_epoch_ms(value) == value
 
 
 def test_parse_epoch_ms_parses_iso_z() -> None:
@@ -46,6 +75,23 @@ def test_require_int_validation() -> None:
         commitment._require_int({}, "missing")
     with pytest.raises(ValueError):
         commitment._require_int({"value": "nope"}, "value")
+
+
+@given(st.floats(min_value=-(10**9), max_value=10**9, allow_nan=False, allow_infinity=False))
+def test_require_int_accepts_float(value: float) -> None:
+    assert commitment._require_int({"value": value}, "value") == int(value)
+
+
+@given(st.booleans())
+def test_require_int_accepts_bool(value: bool) -> None:
+    assert commitment._require_int({"value": value}, "value") == int(value)
+
+
+@given(st.integers(min_value=1, max_value=30), st.integers(min_value=1, max_value=30))
+def test_should_checkin_interval(days_ago: int, interval_days: int) -> None:
+    today = dt.date(2024, 1, 31)
+    last_checkin = (today - dt.timedelta(days=days_ago)).isoformat()
+    assert commitment._should_checkin(today, last_checkin, interval_days) is (days_ago >= interval_days)
 
 
 def test_should_checkin_logic() -> None:
@@ -120,3 +166,45 @@ def test_commitment_manage_update_rejects_bad_dates(tmp_path: Path) -> None:
     bad_update: JSONDict = {"operation": "update", "commitment_id": commitment_id, "end_date": "2024-01-05"}
     with pytest.raises(ValueError):
         asyncio.run(commitment.commitment_manage(ctx, bad_update))
+
+
+def test_row_to_commitment_defaults_missing_optional_columns() -> None:
+    original = set(commitment._WARNED_MISSING_COMMITMENT_COLUMNS)
+    try:
+        row = _row_from_dict(
+            {
+                "id": 1,
+                "name": "Run",
+                "description": "Daily",
+                "user_id": "u1",
+                "channel_id": "c1",
+                "start_date": "2024-01-01",
+                "end_date": "2024-01-05",
+            }
+        )
+        parsed = commitment._row_to_commitment(row)
+        assert parsed.interval_days == commitment.DEFAULT_INTERVAL_DAYS
+        assert parsed.status == "active"
+        assert parsed.last_checkin_date is None
+    finally:
+        commitment._WARNED_MISSING_COMMITMENT_COLUMNS.clear()
+        commitment._WARNED_MISSING_COMMITMENT_COLUMNS.update(original)
+
+
+def test_row_to_commitment_invalid_interval_uses_default() -> None:
+    row = _row_from_dict(
+        {
+            "id": 2,
+            "name": "Read",
+            "description": "Chapter",
+            "user_id": "u2",
+            "channel_id": "c2",
+            "start_date": "2024-02-01",
+            "end_date": "2024-02-10",
+            "interval_days": "nope",
+            "last_checkin_date": None,
+            "status": "active",
+        }
+    )
+    parsed = commitment._row_to_commitment(row)
+    assert parsed.interval_days == commitment.DEFAULT_INTERVAL_DAYS

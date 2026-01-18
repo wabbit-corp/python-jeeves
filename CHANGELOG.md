@@ -7,6 +7,10 @@ The entries below are derived from the git history and grouped by release date.
 ## [Unreleased]
 ### Added
 - Property-based tests for commitment and Brave Search helper logic.
+- Property-based tests for Brave Search API response stripping and search parameters.
+- Property-based tests for rate limiting, CODI message/annot parsing, and statistics utilities.
+- Strict typed_json coercion error-path tests.
+- CODI conversation and training export workflow documentation (`conversations.md`).
 - Hypothesis test dependency for coverage-focused testing (deptry ignore for test-only use).
 - Docker build/run support with `Dockerfile`, `docker-compose.yml`, and `.dockerignore`.
 - CODI auto-annotation tooling (`servant/modules/codi_auto_annotator.py`, `servant/scripts/codi_auto_annotate.py`).
@@ -20,14 +24,28 @@ The entries below are derived from the git history and grouped by release date.
 - QA runner entrypoint is now `check.py`; `check.sh` delegates to it.
 - QA runner `check.sh` now strips OSC/CSI sequences in logs, runs import-linter when available, and improves diff-cover/coverage summaries.
 - `check.py` now models tool output with per-tool issue dataclasses and parses JSON output when available.
+- `check.py` now requests mypy JSON output, parses diff-cover JSON reports, and consumes pytest JUnit XML for structured results.
+- `check.py` now supports quiet mode (SHOW_OUTPUT) and parallel execution (QA_JOBS) with a unified error table.
+- `check.py` now writes coverage XML into the log directory, parses branch coverage from Cobertura output, and prints a branch-first summary.
+- `check.py` unified errors now render source snippets with caret ranges and optional ANSI highlighting.
+- `check.py` bandit parsing now converts column offsets to 1-based spans for accurate caret ranges.
 - CODI/Servant JSON parsing tightened with `typed_json` coercion across models and views.
 - Pyright now reports import cycles as errors.
 - `check.py` now parses tool output into structured issues and prints normalized findings.
+- Coverage fail-under is now 15 to align with current baseline results.
+- `check.py` color output no longer depends on termcolor.
 ### Fixed
 - Broke CODI import cycles by moving community serialization into the model layer and using lightweight protocol types.
 - Centralized disentanglement feature registration/extraction to avoid feature module circular imports.
 - Tightened Brave Search tests to satisfy type checking and import ordering.
 - Updated test typing annotations and emoji stubs to satisfy mypy/pyright, and pointed pyright at the local `.venv`.
+- `check.py` now fails the suite when parsed error issues exist even if tools exit 0, and JSON payload extraction prefers the last payload (including JSON Lines).
+- `check.py` mypy parsing avoids name redefinition warnings and diff-cover uses the non-deprecated JSON format flag.
+- `check.py` unified errors no longer drop warnings on failed tools and now formats diff-cover/coverage/vulture issues cleanly.
+- `check.py` diff-cover file issues now omit non-violating files and show file names in unified error spans.
+- `check.py` summary states now pad before coloring for stable table alignment.
+- `check.py` diff-cover JSON parsing reports threshold failures; unified errors now sort issues and underline multi-line spans to end-of-line.
+- Guarded unigram probability computation against empty or fully-trimmed vocabularies to avoid runtime crashes.
 
 ## [2026-01-14]
 ### Added
