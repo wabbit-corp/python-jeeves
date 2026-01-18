@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import concurrent.futures
+import io
 import json
+import keyword as py_keyword
 import logging
 import os
 import pty
@@ -11,6 +14,11 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import textwrap
+import threading
+import token as token_mod
+import tokenize as tokenize_mod
+import xml.etree.ElementTree as ET
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -51,6 +59,7 @@ class SummaryEntry:
     errors: int
     warnings: int
     log: str
+    details: str = ""
 
 
 @dataclass
@@ -246,7 +255,7 @@ class PipAuditFailure:
 class DiffCoverFileIssue:
     path: str
     coverage: float | None
-    missing_lines: str
+    missing_lines: list[int] = field(default_factory=list)
     raw: str | None = None
 
 
@@ -348,6 +357,8 @@ class Config:
     keep_logs: bool
     preserve_color: bool
     keep_ansi_logs: bool
+    show_output: bool
+    jobs: int
     use_json: bool
     run_bandit: bool
     run_unittest: bool
@@ -365,6 +376,93 @@ class RunContext:
     issues: list[Issue] = field(default_factory=list)
     issues_by_tool: dict[str, list[Issue]] = field(default_factory=dict)
     status: int = 0
+    lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
+
+
+ANSI_COLOR_CODES = {
+    "black": "30",
+    "red": "31",
+    "green": "32",
+    "yellow": "33",
+    "blue": "34",
+    "magenta": "35",
+    "cyan": "36",
+    "white": "37",
+}
+ANSI_ATTR_CODES = {"bold": "1"}
+ANSI_RESET = "\x1b[0m"
+
+
+def _ansi_prefix(color: str | None, attrs: list[str] | None) -> str | None:
+    codes: list[str] = []
+    if attrs:
+        for attr in attrs:
+            code = ANSI_ATTR_CODES.get(attr)
+            if code:
+                codes.append(code)
+    if color:
+        color_code = ANSI_COLOR_CODES.get(color)
+        if color_code:
+            codes.append(color_code)
+    if not codes:
+        return None
+    return f"\x1b[{';'.join(codes)}m"
+
+
+def _supports_color(cfg: Config) -> bool:
+    if not cfg.preserve_color:
+        return False
+    if sys.stdout.isatty() or sys.stderr.isatty():
+        return True
+    return os.environ.get("FORCE_COLOR") == "1"
+
+
+def _c(cfg: Config, text: str, color: str | None = None, attrs: list[str] | None = None) -> str:
+    if not _supports_color(cfg):
+        return text
+    prefix = _ansi_prefix(color, attrs)
+    if not prefix:
+        return text
+    return f"{prefix}{text}{ANSI_RESET}"
+
+
+def _highlight_python_line(cfg: Config, line: str) -> str:
+    """Minimal highlighting: keywords + operators. Preserves whitespace."""
+    if not _supports_color(cfg):
+        return line
+
+    src = line
+    try:
+        tokens = list(tokenize_mod.generate_tokens(io.StringIO(src + "\n").readline))
+    except tokenize_mod.TokenError:
+        return line
+
+    out: list[str] = []
+    cursor = 0
+
+    for tok_type, tok_str, start, end, _ in tokens:
+        if tok_type in {token_mod.NL, token_mod.NEWLINE, token_mod.ENDMARKER}:
+            continue
+
+        s_col = start[1]
+        e_col = end[1]
+        if s_col < cursor:
+            return line
+
+        out.append(src[cursor:s_col])
+        segment = src[s_col:e_col]
+
+        if tok_type == token_mod.NAME and tok_str in py_keyword.kwlist:
+            out.append(_c(cfg, segment, "blue", attrs=["bold"]))
+        elif tok_type == token_mod.OP:
+            out.append(_c(cfg, segment, "cyan"))
+        else:
+            out.append(segment)
+
+        cursor = e_col
+
+    out.append(src[cursor:])
+    return "".join(out)
 
 
 ANSI_CSI_RE = re.compile(rb"\x1b\[[0-9;?]*[ -/]*[@-~]")
@@ -438,17 +536,42 @@ def get_list(data: dict[str, object], key: str) -> list[object] | None:
 
 
 def extract_json_payload(log_text: str) -> object | None:
+    """Return the 'best' JSON payload embedded in log_text.
+
+    Strategy: scan for JSON starts and pick the payload that ends farthest to the right.
+    This tends to pick the real report (often last), not random bracket noise.
+    """
     decoder = json.JSONDecoder()
-    for index, char in enumerate(log_text):
-        if char not in "[{":
-            continue
+    best_payload: object | None = None
+    best_end = -1
+
+    for match in re.finditer(r"[\[{]", log_text):
+        start = match.start()
         try:
-            payload = decoder.raw_decode(log_text[index:])[0]
+            payload, end = decoder.raw_decode(log_text[start:])
         except json.JSONDecodeError:
             continue
-        if isinstance(payload, (dict, list, str, int, float, bool)) or payload is None:
-            return payload
-    return None
+
+        end_index = start + end
+        if end_index > best_end:
+            best_end = end_index
+            best_payload = payload
+
+    return best_payload
+
+
+def extract_json_lines(log_text: str) -> list[object]:
+    """Parse JSON Lines (one JSON value per line). Ignore non-JSON lines."""
+    out: list[object] = []
+    for line in log_text.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped[0] not in "{[":
+            continue
+        try:
+            out.append(json.loads(stripped))
+        except json.JSONDecodeError:
+            continue
+    return out
 
 
 def sanitize_label(label: str) -> str:
@@ -472,8 +595,10 @@ def add_summary(
     errors: int,
     warnings: int,
     log: str,
+    details: str = "",
 ) -> None:
-    ctx.summary.append(SummaryEntry(label, state, rc, errors, warnings, log))
+    with ctx.lock:
+        ctx.summary.append(SummaryEntry(label, state, rc, errors, warnings, log, details))
 
 
 def strip_ansi(data: bytes) -> bytes:
@@ -485,6 +610,7 @@ def run_with_pty(
     cmd: Sequence[str],
     log_path: Path,
     keep_ansi_logs: bool,
+    tee_stdout: bool,
     env: dict[str, str],
 ) -> int:
     master_fd, slave_fd = pty.openpty()
@@ -513,8 +639,9 @@ def run_with_pty(
                     except OSError:
                         chunk = b""
                     if chunk:
-                        sys.stdout.buffer.write(chunk)
-                        sys.stdout.buffer.flush()
+                        if tee_stdout:
+                            sys.stdout.buffer.write(chunk)
+                            sys.stdout.buffer.flush()
                         log_file.write(chunk if keep_ansi_logs else strip_ansi(chunk))
                         log_file.flush()
                         continue
@@ -526,8 +653,9 @@ def run_with_pty(
                         chunk = os.read(master_fd, 4096)
                         if not chunk:
                             break
-                        sys.stdout.buffer.write(chunk)
-                        sys.stdout.buffer.flush()
+                        if tee_stdout:
+                            sys.stdout.buffer.write(chunk)
+                            sys.stdout.buffer.flush()
                         log_file.write(chunk if keep_ansi_logs else strip_ansi(chunk))
                     break
     finally:
@@ -539,7 +667,13 @@ def run_with_pty(
     return proc.wait()
 
 
-def run_with_pipe(cmd: Sequence[str], log_path: Path, env: dict[str, str]) -> int:
+def run_with_pipe(
+    cmd: Sequence[str],
+    log_path: Path,
+    keep_ansi_logs: bool,
+    tee_stdout: bool,
+    env: dict[str, str],
+) -> int:
     proc = subprocess.Popen(
         cmd,
         stdout=subprocess.PIPE,
@@ -551,9 +685,10 @@ def run_with_pipe(cmd: Sequence[str], log_path: Path, env: dict[str, str]) -> in
         raise RuntimeError("stdout pipe not available")
     with log_path.open("wb") as log_file:
         for chunk in iter(lambda: stdout.read(4096), b""):
-            sys.stdout.buffer.write(chunk)
-            sys.stdout.buffer.flush()
-            log_file.write(chunk)
+            if tee_stdout:
+                sys.stdout.buffer.write(chunk)
+                sys.stdout.buffer.flush()
+            log_file.write(chunk if keep_ansi_logs else strip_ansi(chunk))
             log_file.flush()
     stdout.close()
     return proc.wait()
@@ -666,21 +801,9 @@ def extract_counts(
         ):
             errors = 1
     elif label == "coverage report":
-        matches = re.findall(
-            r"^TOTAL\s+.*\s(\d+(?:\.\d+)?)%$",
-            log_text,
-            flags=re.MULTILINE,
-        )
-        if matches:
-            pct = matches[-1]
-            try:
-                ipct = int(pct.split(".", maxsplit=1)[0])
-            except ValueError:
-                ipct = coverage_fail_under
-            if ipct < coverage_fail_under:
-                errors = 1
-        elif re.search(r"Coverage failure:", log_text):
-            errors = 1
+        # Informational only. The gate is branch coverage via "coverage xml".
+        errors = 0
+        warnings = 0
     else:
         errors = len(re.findall(r"\berror\b", log_text, flags=re.IGNORECASE))
         warnings = len(re.findall(r"\bwarning\b", log_text, flags=re.IGNORECASE))
@@ -868,6 +991,41 @@ def parse_import_linter_issues(log_text: str) -> Sequence[ImportLinterResult]:
 
 
 def parse_mypy_issues(log_text: str) -> Sequence[MypyResult]:
+    json_lines = extract_json_lines(log_text)
+    # Declare once to avoid mypy no-redef across branches.
+    notes: list[str] = []
+    if json_lines:
+        issues: list[MypyIssue] = []
+        for item in json_lines:
+            if not isinstance(item, dict):
+                continue
+            message = get_str(item, "message") or ""
+            severity = get_str(item, "severity") or "error"
+            code = get_str(item, "code")
+            path = get_str(item, "file") or get_str(item, "path")
+            line_number = get_int(item, "line")
+            column_number = get_int(item, "column")
+            end_line = get_int(item, "end_line")
+            if end_line is None:
+                end_line = get_int(item, "endLine")
+            end_col = get_int(item, "end_column")
+            if end_col is None:
+                end_col = get_int(item, "endColumn")
+            notes = []
+            note_hint = get_str(item, "hint")
+            if note_hint:
+                notes.append(note_hint)
+            issues.append(
+                MypyIssue(
+                    message=message,
+                    severity=severity,
+                    code=code,
+                    location=issue_location(path, line_number, column_number, end_line, end_col),
+                    notes=notes,
+                )
+            )
+        return issues
+
     payload = extract_json_payload(log_text)
     items: list[object] | None = None
     if isinstance(payload, list):
@@ -888,12 +1046,12 @@ def parse_mypy_issues(log_text: str) -> Sequence[MypyResult]:
             path = get_str(item, "file") or get_str(item, "path")
             line_number = get_int(item, "line")
             column_number = get_int(item, "column")
-            notes: list[str] = []
+            notes = []
             hints = get_list(item, "hints") or get_list(item, "notes")
             if hints:
-                for hint in hints:
-                    if isinstance(hint, str):
-                        notes.append(hint)
+                for note in hints:
+                    if isinstance(note, str):
+                        notes.append(note)
             json_issues.append(
                 MypyIssue(
                     message=message,
@@ -992,7 +1150,49 @@ def parse_pyright_issues(log_text: str) -> Sequence[PyrightResult]:
     return text_issues
 
 
-def parse_pytest_issues(log_text: str) -> Sequence[PytestResult]:
+def parse_pytest_issues(log_text: str, log_path: Path | None = None) -> Sequence[PytestResult]:
+    if log_path is not None:
+        junit_path = log_path.with_suffix(".junit.xml")
+        if junit_path.is_file():
+            return parse_pytest_junit(junit_path)
+    return _parse_pytest_text(log_text)
+
+
+def parse_pytest_junit(junit_path: Path) -> list[PytestResult]:
+    try:
+        xml_text = junit_path.read_text(encoding="utf-8", errors="replace")
+        root = ET.fromstring(xml_text)
+    except Exception as exc:
+        return [PytestFailure(message=f"failed to parse junit xml: {exc}", raw=None)]
+
+    issues: list[PytestResult] = []
+    for testcase in root.iter("testcase"):
+        classname = testcase.attrib.get("classname", "")
+        name = testcase.attrib.get("name", "")
+        nodeid = f"{classname}::{name}" if classname else name
+
+        for tag in ("failure", "error"):
+            elem = testcase.find(tag)
+            if elem is None:
+                continue
+            msg = (elem.attrib.get("message") or "").strip()
+            text = (elem.text or "").strip()
+            message = msg or (text.splitlines()[0] if text else "Test failed")
+            file_ = testcase.attrib.get("file")
+            line_ = testcase.attrib.get("line")
+            issues.append(
+                PytestIssue(
+                    outcome=tag.upper(),
+                    nodeid=nodeid,
+                    message=message,
+                    location=issue_location(file_, line_),
+                    raw=text or None,
+                )
+            )
+    return issues
+
+
+def _parse_pytest_text(log_text: str) -> Sequence[PytestResult]:
     issues: list[PytestResult] = []
     summary_re = re.compile(r"^(FAILED|ERROR)\s+(.+?)(?:\s+-\s+(.*))?$")
     collecting_re = re.compile(r"^ERROR collecting (.+)$")
@@ -1224,6 +1424,11 @@ def parse_bandit_issues(log_text: str) -> Sequence[BanditResult]:
                 path = get_str(item, "filename")
                 line_number = get_int(item, "line_number")
                 column_number = get_int(item, "col_offset")
+                end_column_number = get_int(item, "end_col_offset")
+                if column_number is not None:
+                    column_number += 1
+                if end_column_number is not None:
+                    end_column_number += 1
                 details: list[str] = []
                 more_info = get_str(item, "more_info")
                 if more_info:
@@ -1234,7 +1439,13 @@ def parse_bandit_issues(log_text: str) -> Sequence[BanditResult]:
                         message=message,
                         severity=severity,
                         confidence=confidence,
-                        location=issue_location(path, line_number, column_number),
+                        location=issue_location(
+                            path,
+                            line_number,
+                            column_number,
+                            line_number,
+                            end_column_number,
+                        ),
                         details=details,
                     )
                 )
@@ -1378,8 +1589,78 @@ def parse_pip_audit_issues(log_text: str) -> Sequence[PipAuditResult]:
     return text_issues
 
 
-def parse_diff_cover_issues(log_text: str) -> Sequence[DiffCoverResult]:
+def parse_line_ranges(text: str) -> list[int]:
+    out: list[int] = []
+    for part in (piece.strip() for piece in text.split(",") if piece.strip()):
+        if "-" in part:
+            start_text, end_text = part.split("-", 1)
+            start = to_int(start_text)
+            end = to_int(end_text)
+            if start is None or end is None:
+                continue
+            out.extend(range(min(start, end), max(start, end) + 1))
+        else:
+            value = to_int(part)
+            if value is not None:
+                out.append(value)
+    return sorted(set(out))
+
+
+def parse_diff_cover_issues(
+    log_text: str,
+    log_path: Path | None = None,
+    fail_under: int | None = None,
+) -> Sequence[DiffCoverResult]:
     issues: list[DiffCoverResult] = []
+    json_path = None
+    if log_path is not None:
+        json_path = log_path.parent / "diff-cover.json"
+    if json_path is not None and json_path.is_file():
+        try:
+            payload = json.loads(json_path.read_text(encoding="utf-8", errors="replace"))
+        except Exception:
+            payload = None
+
+        if isinstance(payload, dict):
+            src_stats = payload.get("src_stats")
+            if isinstance(src_stats, dict):
+                for path, stats in src_stats.items():
+                    if not isinstance(path, str) or not isinstance(stats, dict):
+                        continue
+                    pct = to_float(stats.get("percent_covered"))
+                    lines_raw = stats.get("violation_lines")
+                    lines: list[int] = []
+                    if isinstance(lines_raw, list):
+                        for item in lines_raw:
+                            if isinstance(item, int):
+                                lines.append(item)
+                    if lines:
+                        issues.append(
+                            DiffCoverFileIssue(
+                                path=path,
+                                coverage=pct,
+                                missing_lines=lines,
+                            )
+                        )
+            total_violations = to_int(payload.get("total_num_violations"))
+            total_pct = to_float(payload.get("total_percent_covered"))
+            issues.append(
+                DiffCoverSummaryIssue(
+                    missing_lines=total_violations,
+                    coverage=total_pct,
+                    message="Diff coverage summary",
+                )
+            )
+            if fail_under is not None and total_pct is not None and total_pct < fail_under:
+                issues.append(
+                    DiffCoverThresholdIssue(
+                        message="Diff coverage below threshold",
+                        required=fail_under,
+                        raw=f"total={total_pct:.1f}%, fail-under={fail_under}%",
+                    )
+                )
+            return issues
+    # Fall back to parsing text output.
     file_re = re.compile(r"^(.+?) \((\d+(?:\.\d+)?)%\): Missing lines (.+)$")
     for line in log_text.splitlines():
         match = file_re.match(line.strip())
@@ -1388,7 +1669,7 @@ def parse_diff_cover_issues(log_text: str) -> Sequence[DiffCoverResult]:
                 DiffCoverFileIssue(
                     path=match.group(1),
                     coverage=to_float(match.group(2)),
-                    missing_lines=match.group(3).strip(),
+                    missing_lines=parse_line_ranges(match.group(3)),
                     raw=line,
                 )
             )
@@ -1460,8 +1741,75 @@ def parse_coverage_report_issues(log_text: str, coverage_fail_under: int) -> Seq
     return issues
 
 
-def parse_coverage_xml_issues(log_text: str, coverage_fail_under: int) -> Sequence[CoverageXmlResult]:
+@dataclass
+class CoberturaTotals:
+    line_rate: float | None
+    branch_rate: float | None
+    lines_covered: int | None
+    lines_valid: int | None
+    branches_covered: int | None
+    branches_valid: int | None
+
+
+def read_cobertura_totals(xml_path: Path) -> CoberturaTotals | None:
+    try:
+        root = ET.parse(xml_path).getroot()
+    except Exception:
+        return None
+
+    def _f(name: str) -> float | None:
+        value = root.attrib.get(name)
+        return to_float(value) if value is not None else None
+
+    def _i(name: str) -> int | None:
+        value = root.attrib.get(name)
+        return to_int(value) if value is not None else None
+
+    return CoberturaTotals(
+        line_rate=_f("line-rate"),
+        branch_rate=_f("branch-rate"),
+        lines_covered=_i("lines-covered"),
+        lines_valid=_i("lines-valid"),
+        branches_covered=_i("branches-covered"),
+        branches_valid=_i("branches-valid"),
+    )
+
+
+def parse_coverage_xml_issues(
+    log_text: str,
+    coverage_fail_under: int,
+    log_path: Path | None = None,
+) -> Sequence[CoverageXmlResult]:
     issues: list[CoverageXmlResult] = []
+    xml_path = None
+    if log_path is not None:
+        candidate = log_path.parent / "coverage.xml"
+        if candidate.is_file():
+            xml_path = candidate
+
+    if xml_path is not None:
+        totals = read_cobertura_totals(xml_path)
+        if totals and totals.branch_rate is not None:
+            branch_pct = totals.branch_rate * 100.0
+            if branch_pct < coverage_fail_under:
+                issues.append(
+                    CoverageXmlIssue(
+                        total=branch_pct,
+                        fail_under=coverage_fail_under,
+                        message="Branch coverage below threshold",
+                        raw=f"branch={branch_pct:.2f}%, fail-under={coverage_fail_under}%",
+                    )
+                )
+            return issues
+
+        issues.append(
+            CoverageXmlFailure(
+                message="coverage xml produced no readable branch coverage",
+                raw=str(xml_path),
+            )
+        )
+        return issues
+
     failure_match = re.search(
         r"Coverage failure: total of (\d+(?:\.\d+)?) is less than fail-under=(\d+)",
         log_text,
@@ -1503,7 +1851,7 @@ def parse_issues(label: str, log_path: Path, coverage_fail_under: int) -> Sequen
     if label in ("pyright", "basedpyright"):
         return parse_pyright_issues(log_text)
     if label in ("pytest", "coverage run (pytest)"):
-        return parse_pytest_issues(log_text)
+        return parse_pytest_issues(log_text, log_path)
     if label == "unittest":
         return parse_unittest_issues(log_text)
     if label == "deptry":
@@ -1517,11 +1865,11 @@ def parse_issues(label: str, log_path: Path, coverage_fail_under: int) -> Sequen
     if label == "pip-audit":
         return parse_pip_audit_issues(log_text)
     if label == "diff-cover":
-        return parse_diff_cover_issues(log_text)
+        return parse_diff_cover_issues(log_text, log_path, coverage_fail_under)
     if label == "coverage report":
         return parse_coverage_report_issues(log_text, coverage_fail_under)
     if label == "coverage xml":
-        return parse_coverage_xml_issues(log_text, coverage_fail_under)
+        return parse_coverage_xml_issues(log_text, coverage_fail_under, log_path)
 
     return []
 
@@ -1569,6 +1917,205 @@ def format_location(location: IssueLocation | None) -> str:
         if location.column is not None:
             text += f":{location.column}"
     return text
+
+
+def _pretty_path(cfg: Config, raw: str) -> str:
+    """Prefer repo-relative paths when possible."""
+    try:
+        p = Path(raw)
+        root = cfg.root.resolve()
+        if p.is_absolute():
+            rp = p.resolve()
+            try:
+                return str(rp.relative_to(root))
+            except Exception:
+                return str(rp)
+        return raw
+    except Exception:
+        return raw
+
+
+def _cache_key(cfg: Config, path: str) -> str:
+    p = Path(path)
+    if not p.is_absolute():
+        p = cfg.root / p
+    try:
+        return str(p.resolve())
+    except Exception:
+        return str(p)
+
+
+def _read_source_lines(cfg: Config, path: str, cache: dict[str, list[str] | None]) -> list[str] | None:
+    key = _cache_key(cfg, path)
+    if key in cache:
+        return cache[key]
+
+    candidates: list[Path] = []
+    p = Path(path)
+    candidates.append(p)
+    if not p.is_absolute():
+        candidates.append(cfg.root / p)
+
+    for cand in candidates:
+        try:
+            if cand.is_file():
+                text = cand.read_text(encoding="utf-8", errors="replace")
+                lines = text.splitlines()
+                cache[key] = lines
+                return lines
+        except Exception:
+            continue
+
+    cache[key] = None
+    return None
+
+
+def _normalize_col(col: int | None) -> int | None:
+    if col is None:
+        return None
+    return col if col > 0 else 1
+
+
+def _format_span_location(
+    cfg: Config,
+    path: str | None,
+    line: int | None,
+    col: int | None,
+    end_line: int | None,
+    end_col: int | None,
+) -> str:
+    if not path:
+        return "-"
+    pretty = _pretty_path(cfg, path)
+    if line is None:
+        return pretty
+
+    out = f"{pretty}:{line}"
+    if col is None:
+        return out
+
+    out += f":{col}"
+    if end_line == line and end_col is not None and end_col != col:
+        out += f"-{end_col}"
+    elif end_line is not None and end_col is not None and (end_line != line):
+        out += f"-{end_line}:{end_col}"
+    return out
+
+
+def _issue_span(issue: Issue) -> tuple[str | None, int | None, int | None, int | None, int | None]:
+    """Return (path, line, col, end_line, end_col) when known."""
+    if isinstance(issue, RuffIssue):
+        path = issue.location.path
+        line = issue.location.line
+        col = _normalize_col(issue.location.column)
+        if issue.end_location:
+            return (path, line, col, issue.end_location.line, _normalize_col(issue.end_location.column))
+        return (path, line, col, None, None)
+
+    if isinstance(issue, DiffCoverFileIssue):
+        return (issue.path, None, None, None, None)
+
+    loc = getattr(issue, "location", None)
+    if isinstance(loc, IssueLocation):
+        return (
+            loc.path,
+            loc.line,
+            _normalize_col(loc.column),
+            loc.end_line,
+            _normalize_col(loc.end_column),
+        )
+
+    if isinstance(issue, BlackIssue) and issue.path:
+        return (issue.path, None, None, None, None)
+
+    return (None, None, None, None, None)
+
+
+def _issue_sort_key(issue: Issue) -> tuple[str, int, int, str]:
+    path, line, col, _, _ = _issue_span(issue)
+    code_value = getattr(issue, "code", "")
+    code = code_value if isinstance(code_value, str) else ""
+    if not code:
+        rule_value = getattr(issue, "rule", "")
+        code = rule_value if isinstance(rule_value, str) else ""
+    return (path or "", line or 0, col or 0, code)
+
+
+def _render_source_block(
+    cfg: Config,
+    source_cache: dict[str, list[str] | None],
+    path: str,
+    line_no: int,
+    col: int | None,
+    end_line: int | None,
+    end_col: int | None,
+    severity: str,
+    context: int = 0,
+    tabsize: int = 4,
+) -> list[str]:
+    lines = _read_source_lines(cfg, path, source_cache)
+    if not lines:
+        return []
+
+    if line_no < 1 or line_no > len(lines):
+        return []
+
+    start_line = max(1, line_no - context)
+    end_line = min(len(lines), line_no + context)
+    width = len(str(end_line))
+
+    block: list[str] = []
+
+    raw_target = lines[line_no - 1]
+    is_python = path.endswith(".py")
+
+    for ln in range(start_line, end_line + 1):
+        raw = lines[ln - 1].expandtabs(tabsize)
+        shown = _highlight_python_line(cfg, raw) if (is_python and ln == line_no) else raw
+        prefix = f"  {ln:>{width}} | "
+        block.append(prefix + shown)
+
+        if ln == line_no and col is not None:
+            col0 = max(1, col)
+            if end_line is not None and end_line != line_no:
+                end0 = len(raw_target) + 1
+            elif end_col is not None and end_col > col0:
+                end0 = end_col
+            else:
+                end0 = col0 + 1
+
+            col0 = min(col0, len(raw_target) + 1)
+            end0 = min(end0, len(raw_target) + 1)
+
+            disp_start = len(raw_target[: col0 - 1].expandtabs(tabsize))
+            disp_end = len(raw_target[: end0 - 1].expandtabs(tabsize))
+            span = max(1, disp_end - disp_start)
+
+            caret = "^" + ("~" * (span - 1))
+            caret_color = "red" if severity == "error" else "yellow"
+            caret = _c(cfg, caret, caret_color, attrs=["bold"])
+
+            caret_prefix = f"  {'':>{width}} | "
+            block.append(caret_prefix + (" " * disp_start) + caret)
+
+    return block
+
+
+def _wrap_message(text: str, width: int = 100, max_lines: int = 12) -> list[str]:
+    cleaned = text.replace("\u00a0", " ").rstrip()
+    if not cleaned:
+        return []
+    out: list[str] = []
+    for raw_line in cleaned.splitlines() or [""]:
+        raw_line = raw_line.strip()
+        if not raw_line:
+            continue
+        out.extend(textwrap.wrap(raw_line, width=width, subsequent_indent="  "))
+        if len(out) >= max_lines:
+            break
+    if len(out) >= max_lines:
+        out[-1] = out[-1].rstrip("…") + "…"
+    return out
 
 
 def format_issue(label: str, issue: Issue) -> str:
@@ -1675,7 +2222,8 @@ def format_issue(label: str, issue: Issue) -> str:
         message = "Missing lines"
         if issue.coverage is not None:
             extras.append(f"coverage={issue.coverage}")
-        extras.append(f"missing_lines={issue.missing_lines}")
+        if issue.missing_lines:
+            extras.append(f"missing_lines={','.join(str(num) for num in issue.missing_lines)}")
     elif isinstance(issue, DiffCoverSummaryIssue):
         code = "summary"
         message = issue.message
@@ -1724,6 +2272,243 @@ def print_parsed_issues(ctx: RunContext, label: str, issues: Sequence[Issue]) ->
         logger.info(format_issue(label, issue))
 
 
+def compact_message(text: str, limit: int = 500) -> str:
+    one_line = " ".join(text.split())
+    if len(one_line) <= limit:
+        return one_line
+    return one_line[: max(0, limit - 1)] + "…"
+
+
+def tool_sort_key(label: str) -> int:
+    order = [
+        "ruff",
+        "black --check",
+        "import-linter",
+        "mypy",
+        "basedpyright",
+        "pyright",
+        "pyright/basedpyright",
+        "coverage run (pytest)",
+        "pytest",
+        "coverage report",
+        "coverage xml",
+        "diff-cover",
+        "unittest",
+        "deptry",
+        "vulture",
+        "semgrep",
+        "bandit",
+        "pip-audit",
+        "coverage",
+    ]
+    try:
+        return order.index(label)
+    except ValueError:
+        return 999
+
+
+def print_unified_errors(ctx: RunContext) -> None:
+    logger = logging.getLogger("check")
+    cfg = ctx.config
+
+    with ctx.lock:
+        issues_by_tool = dict(ctx.issues_by_tool)
+        summary = list(ctx.summary)
+
+    errors_by_tool: dict[str, list[Issue]] = {}
+    warnings_by_tool: dict[str, list[Issue]] = {}
+
+    for tool, issues in issues_by_tool.items():
+        for issue in issues:
+            sev = issue_severity(issue)
+            if sev == "warning":
+                warnings_by_tool.setdefault(tool, []).append(issue)
+            else:
+                errors_by_tool.setdefault(tool, []).append(issue)
+
+    for summary_entry in summary:
+        if summary_entry.state not in {"FAIL", "MISSING"}:
+            continue
+        if summary_entry.label in errors_by_tool or summary_entry.label in warnings_by_tool:
+            continue
+        errors_by_tool.setdefault(summary_entry.label, [])
+
+    total_errors = sum(len(v) for v in errors_by_tool.values())
+    if total_errors == 0 and not any(e.state in {"FAIL", "MISSING"} for e in summary):
+        return
+
+    source_cache: dict[str, list[str] | None] = {}
+
+    def tool_header(tool: str, n_errors: int, n_warnings: int) -> str:
+        bits = []
+        if n_errors:
+            bits.append(_c(cfg, f"{n_errors} error" + ("s" if n_errors != 1 else ""), "red", attrs=["bold"]))
+        if n_warnings:
+            bits.append(
+                _c(
+                    cfg,
+                    f"{n_warnings} warning" + ("s" if n_warnings != 1 else ""),
+                    "yellow",
+                    attrs=["bold"],
+                )
+            )
+        counts = ", ".join(bits) if bits else "0"
+        return _c(cfg, tool, "cyan", attrs=["bold"]) + f" ({counts})"
+
+    logger.info("")
+    logger.info(_c(cfg, "==> errors", attrs=["bold"]))
+
+    all_tools = sorted(
+        set(errors_by_tool) | set(warnings_by_tool),
+        key=lambda t: tool_sort_key(t),
+    )
+
+    for tool in all_tools:
+        tool_errors = errors_by_tool.get(tool, [])
+        tool_warnings = warnings_by_tool.get(tool, [])
+        failed_without_issues = any(s.label == tool and s.state in {"FAIL", "MISSING"} for s in summary)
+        tool_errors = sorted(tool_errors, key=_issue_sort_key)
+        tool_warnings = sorted(tool_warnings, key=_issue_sort_key)
+        if not tool_errors and not tool_warnings and not failed_without_issues:
+            continue
+
+        logger.info("")
+        logger.info(tool_header(tool, len(tool_errors), len(tool_warnings)))
+
+        if not tool_errors and not tool_warnings and failed_without_issues:
+            failed_entry = next((s for s in summary if s.label == tool and s.state in {"FAIL", "MISSING"}), None)
+            if failed_entry:
+                msg = failed_entry.details or f"{tool} failed (see log: {failed_entry.log})"
+                logger.info("  " + _c(cfg, "ERROR", "red", attrs=["bold"]) + " " + compact_message(msg, 400))
+            continue
+
+        for issues in (tool_errors, tool_warnings):
+            for issue in issues:
+                sev = issue_severity(issue)
+                sev_text = "ERROR" if sev != "warning" else "WARN"
+                sev_color = "red" if sev != "warning" else "yellow"
+
+                code = "-"
+                msg = getattr(issue, "message", "") or str(issue)
+
+                extras: list[str] = []
+
+                if isinstance(issue, RuffIssue):
+                    code = issue.code
+                    msg = issue.message
+                    if issue.fix_available:
+                        extras.append("fixable")
+                elif isinstance(issue, BlackIssue):
+                    code = "reformat"
+                    msg = issue.message
+                elif isinstance(issue, ImportLinterIssue):
+                    code = issue.contract
+                    msg = issue.message
+                elif isinstance(issue, MypyIssue):
+                    code = issue.code or "-"
+                    msg = issue.message
+                elif isinstance(issue, PyrightIssue):
+                    code = issue.rule or "-"
+                    msg = issue.message
+                elif isinstance(issue, PytestIssue):
+                    code = issue.outcome
+                    msg = issue.message
+                    extras.append(f"nodeid={issue.nodeid}")
+                elif isinstance(issue, UnittestIssue):
+                    code = issue.outcome
+                    msg = issue.message
+                    extras.append(f"test={issue.test}")
+                elif isinstance(issue, DeptryIssue):
+                    code = issue.code or "-"
+                    msg = issue.message
+                elif isinstance(issue, VultureIssue):
+                    code = "unused"
+                    msg = issue.message
+                elif isinstance(issue, SemgrepIssue):
+                    code = issue.rule_id
+                    msg = issue.message
+                elif isinstance(issue, BanditIssue):
+                    code = issue.test_id
+                    msg = issue.message
+                    extras.append(f"bandit_severity={issue.severity}")
+                    if issue.confidence:
+                        extras.append(f"confidence={issue.confidence}")
+                elif isinstance(issue, PipAuditIssue):
+                    code = issue.vulnerability_id
+                    msg = f"{issue.package} {issue.installed_version}: vulnerability {issue.vulnerability_id}"
+                    if issue.fix_versions:
+                        extras.append("fix=" + ",".join(issue.fix_versions))
+                elif isinstance(issue, CoverageXmlIssue):
+                    code = "branch"
+                    msg = issue.message
+                elif isinstance(issue, DiffCoverThresholdIssue):
+                    code = "threshold"
+                    msg = issue.message
+                elif isinstance(issue, DiffCoverFileIssue):
+                    code = "missing-lines"
+                    missing = ",".join(str(n) for n in issue.missing_lines[:50])
+                    if len(issue.missing_lines) > 50:
+                        missing += ",…"
+                    msg = f"Missing lines: {missing}" if missing else "Missing lines"
+                    if issue.coverage is not None:
+                        extras.append(f"coverage={issue.coverage:.1f}%")
+                elif isinstance(issue, DiffCoverSummaryIssue):
+                    code = "summary"
+                    msg = issue.message
+                    if issue.missing_lines is not None:
+                        extras.append(f"missing_lines={issue.missing_lines}")
+                    if issue.coverage is not None:
+                        extras.append(f"coverage={issue.coverage:.1f}%")
+                elif isinstance(issue, CoverageReportIssue):
+                    code = "fail-under"
+                    msg = issue.message
+                    if issue.total is not None:
+                        extras.append(f"total={issue.total:.2f}%")
+                    if issue.fail_under is not None:
+                        extras.append(f"fail_under={issue.fail_under}%")
+                elif isinstance(issue, CoverageReportFailure):
+                    code = "coverage-report"
+                    msg = issue.message
+                elif isinstance(issue, CoverageXmlFailure):
+                    code = "coverage-xml"
+                    msg = issue.message
+
+                path, line_no, col, end_line, end_col = _issue_span(issue)
+                location_text = _format_span_location(cfg, path, line_no, col, end_line, end_col)
+
+                header = (
+                    "  "
+                    + _c(cfg, sev_text, sev_color, attrs=["bold"])
+                    + " "
+                    + _c(cfg, code, "magenta", attrs=["bold"])
+                    + "  "
+                    + _c(cfg, location_text, "white", attrs=["bold"])
+                )
+                if extras:
+                    header += "  " + _c(cfg, " ".join(f"[{e}]" for e in extras), "white")
+
+                logger.info(header)
+
+                for wrapped in _wrap_message(msg, width=100, max_lines=10):
+                    logger.info("    " + wrapped)
+
+                if path and line_no is not None and line_no > 0:
+                    block = _render_source_block(
+                        cfg,
+                        source_cache,
+                        path=path,
+                        line_no=line_no,
+                        col=col,
+                        end_line=end_line,
+                        end_col=end_col,
+                        severity=sev,
+                        context=0,
+                        tabsize=4,
+                    )
+                    for bline in block:
+                        logger.info(bline)
+
+
 def failure_issue(label: str, log_text: str) -> Issue:
     message = f"{label} failed"
     if label == "ruff":
@@ -1764,13 +2549,16 @@ def run_cmd(ctx: RunContext, label: str, cmd: Sequence[str], force_pipe: bool = 
     safe_label = sanitize_label(label)
     log_path = ctx.log_dir / f"{safe_label}.log"
 
-    logger.info("")
-    logger.info("==> %s", label)
+    tee = ctx.config.show_output
+    if tee:
+        logger.info("")
+        logger.info("==> %s", label)
 
-    if ctx.config.preserve_color and not force_pipe:
-        rc = run_with_pty(cmd, log_path, ctx.config.keep_ansi_logs, ctx.config.env)
+    use_pty = ctx.config.preserve_color and tee and (not force_pipe)
+    if use_pty:
+        rc = run_with_pty(cmd, log_path, ctx.config.keep_ansi_logs, tee, ctx.config.env)
     else:
-        rc = run_with_pipe(cmd, log_path, ctx.config.env)
+        rc = run_with_pipe(cmd, log_path, ctx.config.keep_ansi_logs, tee, ctx.config.env)
 
     issues = parse_issues(label, log_path, ctx.config.coverage_fail_under)
     if not issues and rc != 0:
@@ -1784,34 +2572,38 @@ def run_cmd(ctx: RunContext, label: str, cmd: Sequence[str], force_pipe: bool = 
         errors, warnings = extract_counts(label, log_path, ctx.config.coverage_fail_under)
 
     state = "PASS"
-    if rc != 0:
+    if rc != 0 or errors > 0:
         state = "FAIL"
-        ctx.status = 1
-    elif errors > 0 or warnings > 0:
+        with ctx.lock:
+            ctx.status = 1
+    elif warnings > 0:
         state = "WARN"
 
     add_summary(ctx, label, state, rc, errors, warnings, str(log_path))
     if issues_list:
-        ctx.issues_by_tool[label] = issues_list
-        ctx.issues.extend(issues_list)
-        print_parsed_issues(ctx, label, issues_list)
+        with ctx.lock:
+            ctx.issues_by_tool[label] = issues_list
+            ctx.issues.extend(issues_list)
     return rc
 
 
 def missing(ctx: RunContext, label: str, hint: str) -> None:
     logger = logging.getLogger("check")
-    logger.info("")
-    logger.info("==> %s (missing)", label)
-    logger.info("%s", hint)
-    ctx.status = 1
-    add_summary(ctx, label, "MISSING", 127, 0, 0, "")
+    if ctx.config.show_output:
+        logger.info("")
+        logger.info("==> %s (missing)", label)
+        logger.info("%s", hint)
+    with ctx.lock:
+        ctx.status = 1
+    add_summary(ctx, label, "MISSING", 127, 1, 0, "", details=hint)
 
 
 def skip(ctx: RunContext, label: str, reason: str) -> None:
     logger = logging.getLogger("check")
-    logger.info("")
-    logger.info("==> %s (skipped - %s)", label, reason)
-    add_summary(ctx, label, "SKIP", 0, 0, 0, "")
+    if ctx.config.show_output:
+        logger.info("")
+        logger.info("==> %s (skipped - %s)", label, reason)
+    add_summary(ctx, label, "SKIP", 0, 0, 0, "", details=reason)
 
 
 def run_tool(
@@ -1834,6 +2626,36 @@ def run_stage(tasks: Iterable[Callable[[], None]]) -> None:
         task()
 
 
+def run_stage_parallel(ctx: RunContext, tasks: Sequence[Callable[[], None]]) -> None:
+    # jobs=0 => run as many workers as tasks (i.e., "all at once")
+    task_list = list(tasks)
+    max_workers = ctx.config.jobs if ctx.config.jobs > 0 else len(task_list)
+    max_workers = max(1, max_workers)
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = [executor.submit(task) for task in task_list]
+        for fut in concurrent.futures.as_completed(futures):
+            try:
+                fut.result()
+            except Exception as exc:
+                with ctx.lock:
+                    ctx.status = 1
+                add_summary(ctx, "runner", "FAIL", 1, 1, 0, "", details=str(exc))
+
+
+def _format_state_cell(cfg: Config, state: str, width: int = 7) -> str:
+    padded = f"{state:<{width}}"
+    if state == "PASS":
+        return _c(cfg, padded, "green", attrs=["bold"])
+    if state in {"FAIL", "MISSING"}:
+        return _c(cfg, padded, "red", attrs=["bold"])
+    if state == "WARN":
+        return _c(cfg, padded, "yellow", attrs=["bold"])
+    if state == "SKIP":
+        return _c(cfg, padded, "cyan", attrs=["bold"])
+    return padded
+
+
 def print_summary(ctx: RunContext) -> None:
     logger = logging.getLogger("check")
     logger.info("")
@@ -1854,12 +2676,39 @@ def print_summary(ctx: RunContext) -> None:
             clean += 1
         total_errors += entry.errors
         total_warnings += entry.warnings
-        logger.info(fmt.format(entry.label, entry.state, entry.rc, entry.errors, entry.warnings))
+        state = _format_state_cell(ctx.config, entry.state, width=7)
+        logger.info(fmt.format(entry.label, state, entry.rc, entry.errors, entry.warnings))
 
     logger.info("-" * (max_label + 35))
     logger.info(fmt.format("TOTAL", "", "", total_errors, total_warnings))
     logger.info("")
     logger.info("clean: %s/%s", clean, len(ctx.summary))
+
+    # Branch-first coverage summary (from Cobertura XML written into log_dir)
+    xml_path = ctx.log_dir / "coverage.xml"
+    totals = read_cobertura_totals(xml_path) if xml_path.is_file() else None
+    if totals and totals.branch_rate is not None:
+        branch_pct = totals.branch_rate * 100.0
+        line_pct = totals.line_rate * 100.0 if totals.line_rate is not None else None
+
+        branch_counts = ""
+        if totals.branches_covered is not None and totals.branches_valid is not None:
+            branch_counts = f" ({totals.branches_covered}/{totals.branches_valid})"
+
+        line_counts = ""
+        if totals.lines_covered is not None and totals.lines_valid is not None:
+            line_counts = f" ({totals.lines_covered}/{totals.lines_valid})"
+
+        logger.info("==> coverage")
+        logger.info(
+            "branch: %.2f%%%s (fail-under=%d%%)",
+            branch_pct,
+            branch_counts,
+            ctx.config.coverage_fail_under,
+        )
+        if line_pct is not None:
+            logger.info("line:   %.2f%%%s", line_pct, line_counts)
+        logger.info("")
 
 
 def command_success(cmd: Sequence[str], env: dict[str, str]) -> bool:
@@ -1939,11 +2788,13 @@ def build_config(argv: Sequence[str], logger: logging.Logger) -> Config:
         bin_dir=bin_dir,
         exclude_csv=".venv,.git,__pycache__,.mypy_cache,.pytest_cache,data,datasets",
         run_coverage=env_flag("RUN_COVERAGE", "1"),
-        coverage_fail_under=env_int("COVERAGE_FAIL_UNDER", 80),
+        coverage_fail_under=env_int("COVERAGE_FAIL_UNDER", 15),
         run_diff_cover=env_flag("RUN_DIFF_COVER", "1"),
         keep_logs=env_flag("KEEP_LOGS", "0"),
         preserve_color=env_flag("PRESERVE_COLOR", "1"),
         keep_ansi_logs=env_flag("KEEP_ANSI_LOGS", "0"),
+        show_output=env_flag("SHOW_OUTPUT", "0"),
+        jobs=env_int("QA_JOBS", 0),
         use_json=env_flag("USE_JSON_OUTPUT", "1"),
         run_bandit=env_flag("RUN_BANDIT", "0"),
         run_unittest=env_flag("RUN_UNITTEST", "0"),
@@ -2000,12 +2851,19 @@ def run_suite(ctx: RunContext) -> None:
             )
 
     def run_mypy() -> None:
+        mypy_args = [cfg.target]
+        mypy_force_pipe = False
+        if cfg.use_json:
+            mypy_args = ["--output", "json", cfg.target]
+            mypy_force_pipe = True
+
         run_tool(
             ctx,
             "mypy",
             "mypy",
             f"Install: {cfg.python} -m pip install mypy",
-            [cfg.target],
+            mypy_args,
+            force_pipe=mypy_force_pipe,
         )
 
     def run_pyright() -> None:
@@ -2037,8 +2895,6 @@ def run_suite(ctx: RunContext) -> None:
                 f"Install: {cfg.python} -m pip install pyright",
             )
 
-    run_stage([run_ruff, run_black, run_import_linter, run_mypy, run_pyright])
-
     def run_tests() -> None:
         pytest_bin = cfg.bin_dir / "pytest"
         if pytest_bin.is_file() and os.access(pytest_bin, os.X_OK):
@@ -2047,6 +2903,8 @@ def run_suite(ctx: RunContext) -> None:
                     [str(cfg.python), "-m", "coverage", "--version"],
                     cfg.env,
                 ):
+                    safe = sanitize_label("coverage run (pytest)")
+                    junit_path = str(ctx.log_dir / f"{safe}.junit.xml")
                     rc = run_cmd(
                         ctx,
                         "coverage run (pytest)",
@@ -2055,12 +2913,16 @@ def run_suite(ctx: RunContext) -> None:
                             "-m",
                             "coverage",
                             "run",
+                            "--branch",
                             "-m",
                             "pytest",
                             "--color=yes",
+                            "--junitxml",
+                            junit_path,
                         ],
                     )
                     if rc == 0:
+                        coverage_xml_path = str(ctx.log_dir / "coverage.xml")
                         run_cmd(
                             ctx,
                             "coverage report",
@@ -2069,14 +2931,13 @@ def run_suite(ctx: RunContext) -> None:
                                 "-m",
                                 "coverage",
                                 "report",
-                                f"--fail-under={cfg.coverage_fail_under}",
                                 "--show-missing",
                             ],
                         )
                         run_cmd(
                             ctx,
                             "coverage xml",
-                            [str(cfg.python), "-m", "coverage", "xml"],
+                            [str(cfg.python), "-m", "coverage", "xml", "-o", coverage_xml_path],
                         )
 
                         if cfg.run_diff_cover:
@@ -2088,14 +2949,17 @@ def run_suite(ctx: RunContext) -> None:
                                 ):
                                     compare_branch = choose_compare_branch(ctx)
                                     if compare_branch:
+                                        json_report = str(ctx.log_dir / "diff-cover.json")
                                         run_cmd(
                                             ctx,
                                             "diff-cover",
                                             [
                                                 str(diff_cover),
-                                                "coverage.xml",
+                                                coverage_xml_path,
                                                 f"--fail-under={cfg.coverage_fail_under}",
                                                 f"--compare-branch={compare_branch}",
+                                                "--format",
+                                                f"json:{json_report}",
                                             ],
                                         )
                                     else:
@@ -2124,16 +2988,26 @@ def run_suite(ctx: RunContext) -> None:
                         "coverage",
                         f"Install: {cfg.python} -m pip install coverage",
                     )
-                    run_cmd(ctx, "pytest", [str(pytest_bin), "--color=yes"])
+                    safe = sanitize_label("pytest")
+                    junit_path = str(ctx.log_dir / f"{safe}.junit.xml")
+                    run_cmd(
+                        ctx,
+                        "pytest",
+                        [str(pytest_bin), "--color=yes", "--junitxml", junit_path],
+                    )
             else:
-                run_cmd(ctx, "pytest", [str(pytest_bin), "--color=yes"])
+                safe = sanitize_label("pytest")
+                junit_path = str(ctx.log_dir / f"{safe}.junit.xml")
+                run_cmd(
+                    ctx,
+                    "pytest",
+                    [str(pytest_bin), "--color=yes", "--junitxml", junit_path],
+                )
 
             if cfg.run_unittest:
                 run_cmd(ctx, "unittest", [str(cfg.python), "-m", "unittest"])
         else:
             run_cmd(ctx, "unittest", [str(cfg.python), "-m", "unittest"])
-
-    run_tests()
 
     def run_deptry() -> None:
         deptry = cfg.bin_dir / "deptry"
@@ -2245,7 +3119,10 @@ def run_suite(ctx: RunContext) -> None:
             force_pipe=pip_audit_force_pipe,
         )
 
-    run_stage([run_deptry, run_vulture, run_semgrep, run_bandit, run_pip_audit])
+    lint_tasks = [run_ruff, run_black, run_import_linter, run_mypy, run_pyright]
+    extra_tasks = [run_deptry, run_vulture, run_semgrep, run_bandit, run_pip_audit]
+
+    run_stage_parallel(ctx, [*lint_tasks, run_tests, *extra_tasks])
 
 
 def _fixture_ruff_json() -> str:
@@ -2265,6 +3142,15 @@ def _fixture_mypy_error() -> str:
         "/var/folders/q_/8bc1ccxs7gb0j26bnvlzqhfc0000gn/T/tmpsvyofbdy/sample.py:2: error: "
         'Incompatible return value type (got "str", expected "int")  [return-value]\n'
         "Found 1 error in 1 file (checked 1 source file)"
+    )
+
+
+def _fixture_mypy_json_lines() -> str:
+    return "\n".join(
+        [
+            '{"file":"a.py","line":1,"column":2,"message":"Bad","code":"misc"}',
+            '{"file":"b.py","line":3,"column":4,"message":"Worse","code":"arg-type","hint":"Try casting"}',
+        ]
     )
 
 
@@ -2346,6 +3232,14 @@ def _test_parse_mypy_error() -> None:
     _assert_true("Incompatible return value type" in issue.message, "mypy message")
 
 
+def _test_parse_mypy_json_lines() -> None:
+    issues = list(parse_mypy_issues(_fixture_mypy_json_lines()))
+    _assert_equal(len(issues), 2, "mypy json lines count")
+    issue = issues[1]
+    assert isinstance(issue, MypyIssue), "mypy json lines issue type"
+    _assert_true("Try casting" in issue.notes, "mypy json lines hint")
+
+
 def _test_parse_pyright_json() -> None:
     issues = list(parse_pyright_issues(_fixture_pyright_json()))
     _assert_equal(len(issues), 15, "pyright issue count")
@@ -2388,7 +3282,9 @@ def _test_parse_deptry_log() -> None:
 
 def _test_parse_diff_cover_snippet() -> None:
     issues = list(parse_diff_cover_issues(_fixture_diff_cover_snippet()))
-    _assert_true(any(isinstance(issue, DiffCoverFileIssue) for issue in issues), "diff-cover file issue")
+    file_issue = next((issue for issue in issues if isinstance(issue, DiffCoverFileIssue)), None)
+    assert isinstance(file_issue, DiffCoverFileIssue), "diff-cover file issue type"
+    _assert_true(1 in file_issue.missing_lines, "diff-cover missing lines parsed")
     _assert_true(any(isinstance(issue, DiffCoverSummaryIssue) for issue in issues), "diff-cover summary issue")
     _assert_true(any(isinstance(issue, DiffCoverThresholdIssue) for issue in issues), "diff-cover threshold issue")
 
@@ -2419,6 +3315,7 @@ def run_self_tests() -> int:
         ("ruff json", _test_parse_ruff_json),
         ("black reformat", _test_parse_black_reformat),
         ("mypy error", _test_parse_mypy_error),
+        ("mypy json lines", _test_parse_mypy_json_lines),
         ("pyright json", _test_parse_pyright_json),
         ("semgrep json", _test_parse_semgrep_json),
         ("bandit json", _test_parse_bandit_json),
@@ -2454,6 +3351,7 @@ def main(argv: Sequence[str]) -> int:
 
     try:
         run_suite(ctx)
+        print_unified_errors(ctx)
         print_summary(ctx)
     finally:
         if ctx.status != 0 or ctx.config.keep_logs:

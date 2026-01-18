@@ -1,6 +1,7 @@
 import os
 
 from codi.api.model.disentanglement.model import Model
+from codi.api.model.input.community import Community
 from codi.api.tests.framework import Framework
 
 
@@ -77,3 +78,12 @@ class TestPairs(TestModel):
         bool_swapped = set(pairs_of_ids) == set(swapped_pairs)
 
         self.assertTrue(bool_pairs or bool_swapped)
+
+
+class TestUnigramProbabilities(Framework):
+    def test_empty_community(self) -> None:
+        community = Community()
+
+        unigram_probabilities = Model.get_unigram_probabilities(community)
+
+        self.assertEqual(unigram_probabilities, {})

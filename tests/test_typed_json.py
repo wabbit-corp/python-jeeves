@@ -11,6 +11,7 @@ from typed_json import (
     JSON,
     coerce_bool,
     coerce_float,
+    coerce_float_strict,
     coerce_int,
     coerce_optional_str,
     coerce_optional_str_list,
@@ -46,6 +47,16 @@ def test_coerce_float_invalid_str_uses_default() -> None:
     assert coerce_float("invalid", default=1.25) == 1.25
 
 
+def test_coerce_float_strict_rejects_bool() -> None:
+    with pytest.raises(ValueError):
+        coerce_float_strict(True, field="value")
+
+
+def test_coerce_float_strict_rejects_invalid_str() -> None:
+    with pytest.raises(ValueError):
+        coerce_float_strict("nope", field="value")
+
+
 def test_coerce_bool_rejects_unexpected_types() -> None:
     with pytest.raises(ValueError):
         coerce_bool([])
@@ -73,10 +84,20 @@ def test_coerce_str_rejects_sequences(value: object) -> None:
         coerce_str(value)
 
 
+def test_coerce_str_rejects_non_str_when_disallowed() -> None:
+    with pytest.raises(ValueError):
+        coerce_str(123, allow_non_str=False)
+
+
 @given(st.text(alphabet=st.characters(min_codepoint=33, max_codepoint=126), min_size=1))
 def test_coerce_optional_str_trims(value: str) -> None:
     padded = f" {value} "
     assert coerce_optional_str(padded) == value
+
+
+def test_coerce_optional_str_rejects_non_str_when_disallowed() -> None:
+    with pytest.raises(ValueError):
+        coerce_optional_str(123, allow_non_str=False)
 
 
 def test_coerce_optional_str_returns_none_for_blank() -> None:

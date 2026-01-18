@@ -33,6 +33,27 @@ def _build_message_context() -> tuple[Community, Channel, Message]:
     return community, channel, message
 
 
+def _build_deserialize_context() -> tuple[
+    Community,
+    Channel,
+    Message,
+    dict[str, Member],
+    dict[str, ChannelRef],
+    dict[str, ChannelRef],
+    dict[str, Author],
+]:
+    community, channel, message = _build_message_context()
+    member = Member()
+    member.uuid = "author-1"
+    member.username = "Ada"
+    member.community = community
+    members: dict[str, Member] = {"author-1": member}
+    channels: dict[str, ChannelRef] = {channel.uuid: channel}
+    uninitialized: dict[str, ChannelRef] = {}
+    authors: dict[str, Author] = {}
+    return community, channel, message, members, channels, uninitialized, authors
+
+
 @given(st.integers(min_value=1, max_value=1_000_000), st.booleans())
 def test_member_mention_retrieve_creates_missing_member(member_id: int, use_bang: bool) -> None:
     community, _, message = _build_message_context()
@@ -196,6 +217,102 @@ def test_message_deserialize_handles_mentions_and_attachments() -> None:
     assert "999" in members
     assert "777" in uninitialized
     assert authors["author-1"] is message.author
+
+
+@given(st.floats(min_value=0.0, max_value=1e9, allow_nan=False, allow_infinity=False))
+def test_message_deserialize_float_timestamp(value: float) -> None:
+    _, _, message, members, channels, uninitialized, authors = _build_deserialize_context()
+    payload: JSONDict = {
+        "id": "msg-1",
+        "authorId": "author-1",
+        "content": "hi",
+        "timestamp": value,
+    }
+
+    message.deserialize(payload, members, channels, uninitialized, authors, platform="discord")
+
+    assert message.timestamp == int(value)
+
+
+@given(st.integers(min_value=0, max_value=1_000_000))
+def test_message_deserialize_numeric_string_timestamp(value: int) -> None:
+    _, _, message, members, channels, uninitialized, authors = _build_deserialize_context()
+    payload: JSONDict = {
+        "id": "msg-1",
+        "authorId": "author-1",
+        "content": "hi",
+        "timestamp": str(value),
+    }
+
+    message.deserialize(payload, members, channels, uninitialized, authors, platform="discord")
+
+    assert message.timestamp == value
+
+
+def test_message_deserialize_reuses_existing_author() -> None:
+    community, channel, message = _build_message_context()
+    author = Author()
+    author.uuid = "author-1"
+    author.username = "Ada"
+    author.community = community
+    members: dict[str, Member] = {"author-1": author}
+    channels: dict[str, ChannelRef] = {channel.uuid: channel}
+    uninitialized: dict[str, ChannelRef] = {}
+    authors: dict[str, Author] = {}
+    payload: JSONDict = {
+        "id": "msg-1",
+        "authorId": "author-1",
+        "content": "hello",
+        "timestamp": "1710000000",
+    }
+
+    message.deserialize(payload, members, channels, uninitialized, authors, platform="discord")
+
+    assert message.author is author
+    assert message in author.messages
+
+
+def test_message_deserialize_rejects_invalid_timestamp_type() -> None:
+    _, _, message, members, channels, uninitialized, authors = _build_deserialize_context()
+    payload: JSONDict = {
+        "id": "msg-1",
+        "authorId": "author-1",
+        "content": "hi",
+        "timestamp": {"bad": "timestamp"},
+    }
+
+    with pytest.raises(ValueError):
+        message.deserialize(payload, members, channels, uninitialized, authors, platform="discord")
+
+
+@given(
+    st.integers(min_value=1, max_value=1_000_000),
+    st.integers(min_value=1, max_value=1_000_000),
+    st.text(alphabet=string.ascii_letters + string.digits + "_-", min_size=1, max_size=12),
+)
+def test_message_deserialize_slack_mentions_and_attachments(
+    member_id: int,
+    channel_id: int,
+    channel_name: str,
+) -> None:
+    _, _, message, members, channels, uninitialized, authors = _build_deserialize_context()
+    payload: JSONDict = {
+        "id": "msg-1",
+        "authorId": "author-1",
+        "content": f"hi <@U{member_id}|user> <#C{channel_id}|{channel_name}>",
+        "timestamp": 123.4,
+        "attachments": [{"url": "https://example.com/a.png"}, "skip"],
+    }
+
+    message.deserialize(payload, members, channels, uninitialized, authors, platform="slack")
+
+    assert any(isinstance(content, SlackMemberMention) for content in message.contents)
+    assert any(isinstance(content, SlackChannelMention) for content in message.contents)
+    assert str(member_id) in members
+    assert str(channel_id) in uninitialized
+    created_channel = uninitialized[str(channel_id)]
+    assert created_channel.path == channel_name
+    assert len(message.attachments) == 1
 
 
 def test_member_mention_requires_members() -> None:

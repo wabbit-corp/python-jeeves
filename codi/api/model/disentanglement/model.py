@@ -531,6 +531,9 @@ class Model:
         :param range_top_words: The number of top words to remove
         :return: A dictionary of unigram probabilities
         """
+        if range_top_words < 0:
+            raise ValueError("range_top_words must be non-negative")
+
         unigram_probabilities: dict[str, float] = {}
         messages = community.get_messages()
 
@@ -548,12 +551,19 @@ class Model:
                 except KeyError:
                     unigram_probabilities[word.lower()] = 1
 
+        if not unigram_probabilities:
+            return {}
+
         # Remove the top 50 most common unigrams
-        for _ in range(range_top_words):
+        for _ in range(min(range_top_words, len(unigram_probabilities))):
             maximum = max(unigram_probabilities, key=lambda key: unigram_probabilities[key])
             unigram_probabilities.pop(maximum)
+            if not unigram_probabilities:
+                return {}
 
         total = sum(unigram_probabilities.values())
+        if total <= 0:
+            return {}
 
         # Normalize the probabilities
         for word in unigram_probabilities:

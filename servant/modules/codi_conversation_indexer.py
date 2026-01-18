@@ -928,31 +928,32 @@ async def codi_conversation_routine(ctx: GlobalContext, obj: JSON) -> JSONDict:
     count = len(channels) if isinstance(channels, list) else 0
     return {"ok": True, "channels": count}
 
+# Disabled for now
 
-codi_conversation_task: RoutineTask = RoutineTask(
-    name="codi_conversation_indexer",
-    description="Disentangle channels with CODI, persist conversation IDs, hash and name them.",
-    run_every_seconds=DEFAULT_RUN_EVERY_SECONDS,
-    function=codi_conversation_routine,
-)
+# codi_conversation_task: RoutineTask = RoutineTask(
+#     name="codi_conversation_indexer",
+#     description="Disentangle channels with CODI, persist conversation IDs, hash and name them.",
+#     run_every_seconds=DEFAULT_RUN_EVERY_SECONDS,
+#     function=codi_conversation_routine,
+# )
 
 
-analyze_conversations_tool: ToolDef = ToolDef(
-    name="codi_analyze_conversations",
-    schema={
-        "name": "codi_analyze_conversations",
-        "description": "Batch analyze channel history with CODI, persist stable conversation ids, hash and name them.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "channel_id": {"type": "string"},
-                "guild_id": {"type": "string"},
-                "model_dir": {"type": "string"},
-                "features": {"type": "array", "items": {"type": "string"}},
-                "force": {"type": "boolean"},
-            },
-            "required": [],
-        },
-    },
-    function=analyze_conversations,
-)
+# analyze_conversations_tool: ToolDef = ToolDef(
+#     name="codi_analyze_conversations",
+#     schema={
+#         "name": "codi_analyze_conversations",
+#         "description": "Batch analyze channel history with CODI, persist stable conversation ids, hash and name them.",
+#         "parameters": {
+#             "type": "object",
+#             "properties": {
+#                 "channel_id": {"type": "string"},
+#                 "guild_id": {"type": "string"},
+#                 "model_dir": {"type": "string"},
+#                 "features": {"type": "array", "items": {"type": "string"}},
+#                 "force": {"type": "boolean"},
+#             },
+#             "required": [],
+#         },
+#     },
+#     function=analyze_conversations,
+# )
