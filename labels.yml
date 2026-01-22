@@ -1,0 +1,2807 @@
+- group: promo_and_solicitation
+  description: "Promotion & Solicitation"
+  subgroups:
+    - group: promo_services_for_hire
+      description: Someone marketing themselves as available for work (portfolio pitch, skills list, “DM me”).
+      cues:
+        - "available for work"
+        - "open to work"
+        - "open for work"
+        - "currently available"
+        - "taking new clients"
+        - "accepting clients"
+        - "accepting projects"
+        - "freelance"
+        - "freelancer"
+        - "contractor"
+        - "for hire"
+        - "hire me"
+        - "hire us"
+        - "looking for gigs"
+        - "looking for work"
+        - "seeking opportunities"
+        - "DM me"
+        - "message me"
+        - "inbox me"
+        - "reach out"
+        - "contact me"
+        - "let's work together"
+        - "work with me"
+        - "commission"
+        - "my rates"
+        - "rate card"
+        - "portfolio"
+        - "bookings open"
+        - "slots available"
+      examples:
+        positives:
+          - "Freelance developer available for work. DM me for details."
+          - "Open to work: backend + infra. Portfolio in bio."
+          - "Taking new clients this month. Message me if you need help."
+          - "For hire: I build Shopify stores. Rates available on request."
+        negatives:
+          - "How do I hire a freelancer without getting scammed?"
+          - "I’m updating my portfolio site and need feedback."
+          - "My company is hiring a contractor, but I’m not the recruiter."
+          - "What does “open to work” mean on LinkedIn?"
+    - group: promo_agency_or_company_services
+      description: “We are a team/studio/company and we offer X.”
+      cues:
+        - "our company"
+        - "our agency"
+        - "our studio"
+        - "we are a team"
+        - "we're a team"
+        - "we are an agency"
+        - "we're an agency"
+        - "we are a studio"
+        - "we're a studio"
+        - "company specializing in"
+        - "agency specializing in"
+        - "we specialize in"
+        - "specialising in"
+        - "we offer"
+        - "we provide"
+        - "our services"
+        - "services include"
+        - "end-to-end"
+        - "full-service"
+        - "managed services"
+        - "consulting services"
+        - "book a call"
+        - "schedule a call"
+        - "discovery call"
+        - "free consultation"
+        - "request a quote"
+        - "get a quote"
+        - "pricing packages"
+        - "retainer"
+        - "case studies"
+        - "our clients"
+        - "work with us"
+        - "partner with our team"
+      examples:
+        positives:
+          - "We’re a product design agency specializing in fintech. Book a call to discuss."
+          - "Our studio offers end-to-end video production. Request a quote."
+          - "We provide managed DevOps services for startups. Free consultation available."
+          - "Our company specializes in SEO and paid media. Work with us."
+        negatives:
+          - "I work at an agency that specializes in fintech."
+          - "Our company uses a vendor for SEO."
+          - "We’re building an internal tool for our team."
+          - "Can someone recommend an agency for branding?"
+    - group: promo_product_or_project
+      description: Promoting an app/tool/startup/repo.
+      cues:
+        - "check out my project"
+        - "check out our project"
+        - "try my tool"
+        - "try our tool"
+        - "introducing"
+        - "i built"
+        - "we built"
+        - "just launched"
+        - "launching soon"
+        - "now live"
+        - "release"
+        - "new release"
+        - "v1.0"
+        - "beta"
+        - "public beta"
+        - "open beta"
+        - "early access"
+        - "join the waitlist"
+        - "sign up"
+        - "get started"
+        - "download"
+        - "install"
+        - "demo"
+        - "live demo"
+        - "github"
+        - "repo"
+        - "open source"
+        - "star the repo"
+        - "chrome extension"
+        - "browser extension"
+        - "app store"
+        - "google play"
+        - "product hunt"
+        - "newsletter signup"
+      examples:
+        positives:
+          - "Introducing my new CLI tool for log parsing. GitHub link in comments."
+          - "We just launched our budgeting app. Try it out and let me know."
+          - "Check out my open-source repo. Stars appreciated."
+          - "Launching soon: a Chrome extension that blocks spoilers. Join the waitlist."
+        negatives:
+          - "What’s the best open-source repo for log parsing?"
+          - "I’m comparing budgeting apps, any suggestions?"
+          - "How do I publish to the App Store?"
+          - "I’m debugging a Chrome extension crash."
+    - group: promo_community_invite
+      description: Discord/Telegram/community invites.
+      cues:
+        - "join my server"
+        - "join our server"
+        - "join our community"
+        - "join our discord"
+        - "join my discord"
+        - "discord.gg"
+        - "discord.com/invite"
+        - "invite link"
+        - "server invite"
+        - "join our telegram"
+        - "join my telegram"
+        - "t.me/"
+        - "telegram.me/"
+        - "join the group"
+        - "group chat"
+        - "community chat"
+        - "slack invite"
+        - "join our slack"
+        - "private community"
+        - "members-only community"
+        - "dm for invite"
+        - "message me for invite"
+        - "link in bio"
+        - "~discord_invite"
+      examples:
+        positives:
+          - "Join our Discord: discord.gg/abc123"
+          - "We’ve got a Telegram group for daily discussion. t.me/xyz"
+          - "DM me for an invite link to the community Slack."
+          - "Join our community chat, invite link below."
+        negatives:
+          - "I joined a Discord server yesterday."
+          - "How do I create a Discord invite link?"
+          - "Telegram is blocked on my network, any alternatives?"
+          - "Our community has been quiet lately."
+    - group: promo_event_webinar_registration
+      description: Webinars/workshops/AMA requiring signup.
+      cues:
+        - "register for"
+        - "registration link"
+        - "sign up for"
+        - "rsvp"
+        - "reserve your spot"
+        - "save your seat"
+        - "limited seats"
+        - "webinar"
+        - "workshop"
+        - "seminar"
+        - "masterclass"
+        - "training session"
+        - "live session"
+        - "live demo"
+        - "ama"
+        - "q&a"
+        - "join us live"
+        - "eventbrite"
+        - "meetup.com"
+        - "tickets"
+        - "get tickets"
+        - "zoom webinar"
+        - "google meet"
+        - "microsoft teams"
+        - "calendar invite"
+        - "add to calendar"
+      examples:
+        positives:
+          - "Register for our webinar on CI/CD best practices. Seats are limited."
+          - "RSVP for the workshop: link in bio."
+          - "Join us live for an AMA. Sign up to get the calendar invite."
+          - "Tickets are available on Eventbrite. Save your seat."
+        negatives:
+          - "I attended a webinar last week on CI/CD."
+          - "How do I host a Zoom webinar?"
+          - "What’s the difference between a workshop and a seminar?"
+          - "Our team scheduled a meeting, no registration needed."
+    - group: collaboration_partnership_request
+      description: Requests for collaboration/partnerships.
+      cues:
+        - "looking for collaborators"
+        - "looking for a collaborator"
+        - "collaborate with me"
+        - "collab"
+        - "collaboration"
+        - "join forces"
+        - "looking for a partner"
+        - "seeking a partner"
+        - "partner up"
+        - "strategic partner"
+        - "cofounder"
+        - "co-founder"
+        - "seeking cofounder"
+        - "build together"
+        - "let's team up"
+        - "partner"
+        - "joint venture"
+        - "jv"
+      examples:
+        positives:
+          - "Looking for collaborators on a Rust game engine project."
+          - "Seeking a cofounder with marketing experience. Let’s partner up."
+          - "Anyone want to collab on a paper about LLM evals?"
+          - "Looking for a strategic partner to launch this product."
+        negatives:
+          - "I collaborated with them last year."
+          - "How do partnerships work legally?"
+          - "We partnered with a vendor for payments."
+          - "What’s the best way to manage collaboration in Git?"
+    - group: referral_brokerage
+      description: Referral or brokerage services for a fee.
+      cues:
+        - "referral"
+        - "referrals"
+        - "referral fee"
+        - "for a fee"
+        - "commission"
+        - "placement fee"
+        - "broker"
+        - "brokerage"
+        - "i can connect you"
+        - "i'll introduce you"
+        - "paid intro"
+        - "warm intro"
+        - "for a cut"
+        - "i take a percentage"
+        - "send me your resume"
+        - "resume"
+        - "cv"
+        - "i'll refer you"
+      examples:
+        positives:
+          - "I can refer you to a recruiter for a small fee."
+          - "Paid intro available. I’ll connect you with investors."
+          - "Send me your resume, I do placements for commission."
+          - "I broker referrals to agencies. DM for terms."
+        negatives:
+          - "Can you refer me to a good dentist?"
+          - "I got a referral from a friend."
+          - "My resume needs rewriting."
+          - "How do referral programs work at companies?"
+    - group: contest_giveaway_prize
+      description: Promoting contests, giveaways, or prizes.
+      cues:
+        - "enter to win"
+        - "giveaway"
+        - "contest"
+        - "sweepstakes"
+        - "raffle"
+        - "prize"
+        - "rewards"
+        - "grand prize"
+        - "winner"
+        - "winners"
+        - "drawing"
+        - "draw"
+        - "deadline to enter"
+        - "ends on"
+        - "submit your entry"
+        - "rules"
+        - "terms and conditions"
+        - "follow to enter"
+        - "like and share"
+        - "retweet"
+        - "tag a friend"
+        - "free gift"
+        - "claim your prize"
+        - "gift card"
+      examples:
+        positives:
+          - "Giveaway time: enter to win a free annual subscription."
+          - "Contest: tag a friend and follow to enter. Winner announced Friday."
+          - "Raffle for charity, grand prize is a new laptop. Submit your entry."
+          - "Enter to win a $100 gift card. Rules in the thread."
+        negatives:
+          - "I won a prize in a contest once."
+          - "What are the legal rules for running a giveaway?"
+          - "This product has a rewards program."
+          - "I’m entering a drawing at work."
+    - group: promo_personal_blog_or_medium
+      description: >
+        Promoting a personal blog / Medium posts for personal branding, traffic, subscribers,
+        or monetization (ads, Medium Partner Program, affiliate links, sponsorships).
+      cues:
+        # Explicit self-promo phrasing
+        - "read my blog"
+        - "check out my blog"
+        - "visit my blog"
+        - "my blog post"
+        - "my latest post"
+        - "new post"
+        - "i wrote about"
+        - "i published a post"
+        - "i just published"
+        - "i just wrote"
+        - "here's my article"
+        - "my article"
+        - "my write-up"
+        - "my newsletter"
+        - "subscribe to my blog"
+        - "subscribe to my newsletter"
+        - "follow my blog"
+        - "follow me on medium"
+        - "follow for more"
+
+        # Medium-specific / platform cues
+        - "medium.com/@"
+        - "medium.com/p/"
+        - "substack.com"
+        - "hashnode"
+        - "dev.to"
+        - "ghost blog"
+        - "wordpress"
+        - "blogspot"
+        - "link in bio"
+        - "read it here:"
+        - "full post here"
+        - "friends link"          # Medium “Friend Link” phrasing
+        - "clap for this"
+        - "give it a clap"
+        - "claps appreciated"
+        - "highlight this"
+        - "responses welcome"
+
+        # Monetization / funnel language
+        - "support my writing"
+        - "support me"
+        - "buy me a coffee"
+        - "kofi"
+        - "ko-fi"
+        - "patreon"
+        - "donate"
+        - "tip jar"
+        - "affiliate link"
+        - "affiliate links"
+        - "sponsored post"
+        - "sponsor"
+        - "adsense"
+        - "ad revenue"
+        - "monetize"
+        - "medium partner program"
+        - "partner program"
+        - "paid subscribers"
+        - "premium newsletter"
+        - "membership"
+        - "join as a paid member"
+
+      examples:
+        positives:
+          - "I just published a Medium post on LLM evals. Give it a read and clap if you like it."
+          - "Check out my blog post about Kubernetes. Full post here: medium.com/@me/..."
+          - "New article up on my personal blog. Subscribe for weekly posts."
+          - "Support my writing on Medium Partner Program by reading this story."
+          - "I wrote a breakdown of React performance. Link in bio."
+          - "Here’s my latest newsletter issue. Paid subscribers get the full version."
+          - "Read my write-up and share it if it helps you."
+          - "I’m monetizing my blog with affiliate links, here’s my new post."
+          - "Follow me on Medium for more posts like this."
+          - "Buy me a coffee if you found my article useful."
+
+        negatives:
+          - "Can you recommend good Medium writers on distributed systems?"
+          - "I read a Medium article about Kubernetes yesterday."
+          - "Is Medium Partner Program worth it?"
+          - "How do I start a blog and set up SEO?"
+          - "Can you summarize this Medium post I’m reading?"
+          - "I’m building a blogging platform (not promoting a blog)."
+          - "What’s the best way to structure a technical article?"
+          - "How do ads work on websites?"
+          - "I need help editing my draft before I publish it."
+          - "Where can I find credible sources on this topic?"
+    - group: project_seeking_request
+      description: >
+        People searching for projects to join or contribute to (open-source, side projects,
+        hackathon builds, community projects). Unlike collaboration_partnership_request,
+        the speaker is *seeking an existing project/team* rather than recruiting others
+        for their own project.
+      cues:
+        # Direct intent to find a project to join
+        - "looking for a project"
+        - "looking for projects"
+        - "seeking a project"
+        - "seeking projects"
+        - "looking for a project to join"
+        - "looking to join a project"
+        - "want to join a project"
+        - "any projects i can join"
+        - "anyone have a project i can help with"
+        - "anyone need help on a project"
+        - "anyone need an extra hand"
+        - "looking for something to work on"
+        - "looking for a side project"
+        - "looking for a weekend project"
+        - "looking for a hobby project"
+        - "looking for a fun project"
+        - "looking for real-world projects"
+
+        # Contribution language (especially OSS)
+        - "looking to contribute"
+        - "want to contribute"
+        - "open source project to contribute to"
+        - "any open source projects"
+        - "any repos needing help"
+        - "maintainers needed"
+        - "maintainer looking for help"
+        - "contributors wanted"
+        - "i can contribute"
+        - "i'm happy to contribute"
+        - "good first issue"
+        - "beginner friendly issues"
+        - "help wanted"
+        - "help-wanted"
+        - "first-timers only"
+        - "issues to pick up"
+        - "tickets to pick up"
+
+        # Team-joining (without “partner/cofounder” framing)
+        - "join a team"
+        - "join a dev team"
+        - "join a hackathon team"
+        - "looking for a hackathon project"
+        - "any hackathon teams need"
+        - "looking for a team to join"
+        - "need a team to join"
+
+      examples:
+        positives:
+          - "Looking for an open-source project to contribute to. Any maintainers need help?"
+          - "I’ve got evenings free. Anyone have a side project I can join?"
+          - "Any repos with beginner-friendly issues? I want something real to work on."
+          - "Looking for a hackathon team/project to jump into this weekend."
+          - "Seeking projects needing a frontend contributor (React)."
+          - "Does anyone need an extra engineer on an existing project?"
+          - "I want to contribute to a community project. Where can I help?"
+          - "Any maintainers looking for contributors for bug fixes and docs?"
+          - "Looking for something to build with a team, preferably OSS."
+          - "Any projects with a backlog of issues I can pick up?"
+
+        negatives:
+          - "Looking for collaborators for my project (need a backend dev)."   # recruiting, not seeking
+          - "We are hiring engineers for our team."                            # recruiting/hiring
+          - "Freelance developer available for paid client projects."          # services-for-hire
+          - "Can you help me with my school project?"                          # help request, not seeking a project to join
+          - "Looking for project ideas for my portfolio."                      # ideas, not joining an existing project
+          - "What project management tool should we use?"                      # PM tooling
+          - "I’m looking for a contractor to deliver a project."               # hiring a contractor
+          - "Partner wanted for my startup (cofounder)."                       # partnership/cofounder
+          - "Join our Discord community for projects."                         # community invite
+          - "Here’s my project, check it out."                                 # product/project promo
+    - group: investor_fundraising_request
+      description: >
+        Seeking investors or funding for a startup/project (angel/VC), including pitch-deck outreach,
+        “raising a round,” and DM-based investor solicitation. Typically framed as fundraising rather
+        than offering guaranteed returns (which belongs in fraudulent investment promos).
+      cues:
+        # Direct investor seeking
+        - "seeking investors"
+        - "looking for investors"
+        - "searching for investors"
+        - "in search of investors"
+        - "investor wanted"
+        - "investors needed"
+        - "looking for an angel investor"
+        - "angel investor"
+        - "angel round"
+        - "seeking angels"
+        - "vc"
+        - "venture capital"
+        - "venture investor"
+        - "institutional investors"
+        - "strategic investor"
+        - "lead investor"
+
+        # Fundraising language
+        - "raising"
+        - "raising funds"
+        - "raising capital"
+        - "fundraising"
+        - "fund raise"
+        - "funding"
+        - "seeking funding"
+        - "looking for funding"
+        - "capital raise"
+        - "raise a round"
+        - "closing a round"
+        - "pre-seed"
+        - "seed round"
+        - "seed funding"
+        - "series a"
+        - "series b"
+        - "bridge round"
+        - "convertible note"
+        - "safe note"
+        - "term sheet"
+        - "valuation"
+        - "cap table"
+        - "runway"
+
+        # Pitch / outreach patterns
+        - "pitch deck"
+        - "deck"
+        - "investor deck"
+        - "pitch"
+        - "pitching"
+        - "demo"
+        - "product demo"
+        - "intro to investors"
+        - "warm intro"
+        - "happy to share more details"
+        - "let's discuss opportunities"
+        - "potential opportunity"
+        - "dm me"
+        - "message me"
+        - "inbox me"
+        - "reach out"
+        - "connect with investors"
+
+        # Startup-y context (weak signals, but useful)
+        - "mvp"
+        - "startup"
+        - "founder"
+        - "cofounder"     # can overlap with partnership requests
+        - "go-to-market"
+        - "traction"
+        - "pre-revenue"
+        - "revenue"
+        - "users"
+        - "growth"
+        - "accelerator"
+        - "incubator"
+
+      examples:
+        positives:
+          - "I am actively seeking investors to support my ventures. DM me to discuss."
+          - "Raising a pre-seed round for our MVP. Looking for angels."
+          - "We’re fundraising for seed. Happy to share our pitch deck."
+          - "Searching for a lead investor for our Series A."
+          - "Seeking funding for a healthcare AI startup. Message me for the deck."
+          - "Looking for strategic investors and introductions to VCs."
+          - "Closing our seed round soon. Reach out if interested."
+          - "Raising capital via SAFE note. DM for details."
+          - "Seeking an investor partner to accelerate go-to-market."
+          - "I’d love a warm intro to investors interested in AI/ML."
+
+        negatives:
+          - "How do I pitch VCs effectively? Any advice?"
+          - "What’s the difference between seed and Series A?"
+          - "I’m investing my savings, should I buy ETFs?"
+          - "Guaranteed 10% daily returns, DM to join."   # fraudulent_investment_opportunities instead
+          - "Looking for collaborators to help build my project."  # collaboration/partnership
+          - "We are hiring engineers."                    # recruiting/hiring
+          - "Check out my app, launching soon."           # promo_product_or_project
+          - "Is this investor outreach message a scam?"
+          - "I’m reading about venture capital trends."
+          - "Can you review my pitch deck copy?"          # could be normal assistance, not solicitation
+    - group: engagement_bait_or_karma_farming
+      description: >
+        Posts primarily asking for engagement (upvotes/likes/shares/stars/follows)
+        to boost metrics, often paired with a linkdrop. No giveaway or substantive request.
+      cues:
+        - "upvote"
+        - "a few upvotes"
+        - "like and share"
+        - "retweet"
+        - "clap"
+        - "star the repo"
+        - "follow me"
+        - "boost this"
+        - "help me win"
+        - "vote for my"
+      examples:
+        positives:
+          - "A few upvotes please! Here’s my app: <link>"
+          - "Star my repo if you like it: <repo link>"
+          - "Boost this post so more people see it."
+        negatives:
+          - "How do upvotes work on this platform?"
+          - "Can you review my repo? Here’s the link. (no engagement ask)"
+          - "Contest giveaway: like/share to enter (belongs in contest_giveaway_prize)"
+    - group: promo_personal_content
+      description: >
+        Promoting self-authored educational content to drive attention/traffic/brand:
+        blog posts, newsletters, notebooks (Kaggle/Colab), tutorials, videos, etc.
+        Often includes "check it out" + link + soft CTA (feedback welcome, subscribe, follow).
+      cues:
+        - "i'm happy to share"
+        - "i wrote"
+        - "i published"
+        - "my latest"
+        - "check it out"
+        - "here's the link"
+        - "feedback welcome"
+        - "let me know your thoughts"
+        # platform cues (expand as needed)
+        - "kaggle.com/code/"
+        - "colab.research.google.com"
+        - "medium.com"
+        - "substack.com"
+        - "dev.to"
+        - "hashnode"
+        - "youtube.com"
+      examples:
+        positives:
+          - "I’m happy to share my latest Kaggle notebook on BART fine-tuning. Here’s the link."
+          - "I wrote a tutorial on attention mechanisms. Check it out and let me know your thoughts."
+        negatives:
+          - "Can someone recommend a Kaggle notebook on summarization?"  # resource request
+          - "Here’s a paper summary + critique + question (no self-promo CTA)." # high_signal
+    - group: application_or_lead_capture_form
+      description: >
+        Asking users to submit details via a form (Google Forms/Typeform/etc.) to apply, join,
+        enroll, or be contacted. Not research questionnaires; it’s intake/funneling.
+      cues:
+        - "form link"
+        - "fill out this form"
+        - "apply here"
+        - "registration form"
+        - "forms.gle"
+        - "typeform"
+        - "google form"
+        - "submit your details"
+      examples:
+        positives:
+          - "FORM LINK: forms.gle/... Apply for our training/internship."
+          - "Fill this registration form to join."
+        negatives:
+          - "Anonymous survey for research participants (research_recruitment/survey)."
+
+- group: careers_and_employment
+  description: "Careers & Employment"
+  subgroups:
+    - group: job_seeker_employee_position
+      description: >
+        Individuals seeking an employee role (full-time/part-time/internship/temp-to-perm),
+        not marketing freelance/agency services. Often includes “open to work”, referrals,
+        resume/CV sharing, and role-specific job seeking posts.
+      cues:
+        # Direct job seeking intent
+        - "looking for a job"
+        - "job search"
+        - "seeking employment"
+        - "seeking a role"
+        - "seeking a position"
+        - "looking for a role"
+        - "looking for a position"
+        - "open to opportunities"
+        - "open to new opportunities"
+        - "open to work"
+        - "actively interviewing"
+        - "actively applying"
+        - "on the job market"
+        - "back on the market"
+        - "available immediately"
+        - "available to start"
+        - "immediate start"
+
+        # Employee-role language (vs freelance)
+        - "full-time role"
+        - "part-time role"
+        - "full-time position"
+        - "permanent role"
+        - "permanent position"
+        - "employee position"
+        - "FTE"
+        - "W2"
+        - "salaried"
+        - "salary range"
+        - "benefits"
+        - "health benefits"
+        - "401k"
+        - "pension"
+        - "internship"
+        - "intern"
+        - "new grad"
+        - "graduate role"
+        - "entry-level role"
+        - "junior role"
+        - "career switch"
+        - "career transition"
+
+        # Referral / recruiter outreach phrasing
+        - "referral"
+        - "referrals appreciated"
+        - "any referrals"
+        - "please refer"
+        - "can anyone refer"
+        - "recruiter"
+        - "recruiters"
+        - "recruiter reach out"
+        - "connect me with a recruiter"
+        - "hiring manager"
+        - "if your team is hiring"
+        - "if you know of openings"
+        - "any openings"
+        - "any leads"
+
+        # Common context signals
+        - "laid off"
+        - "recently laid off"
+        - "impacted by layoffs"
+        - "seeking my next role"
+        - "seeking my next opportunity"
+        - "returning to work"
+        - "re-entering the workforce"
+
+        # Logistics (often present in job-seeker posts)
+        - "remote"
+        - "hybrid"
+        - "on-site"
+        - "relocation"
+        - "willing to relocate"
+        - "work authorization"
+        - "visa sponsorship"
+        - "h1b"
+        - "tn visa"
+        - "sponsorship required"
+
+      examples:
+        positives:
+          - "Open to work: seeking a full-time backend engineer role. Referrals appreciated."
+          - "Recently laid off, looking for my next position in data analytics."
+          - "Actively interviewing for PM roles. If your team is hiring, please reach out."
+          - "New grad seeking an entry-level software engineering role."
+          - "Looking for a permanent role (FTE), preferably remote or hybrid."
+          - "Searching for an internship for summer. Any leads?"
+          - "On the job market again. Seeking a junior QA position."
+          - "Available immediately for a full-time customer support role."
+          - "Career transition: seeking my first role in cybersecurity."
+          - "If anyone can refer me for a role at your company, I’d really appreciate it."
+          - "Seeking a salaried position with benefits in Toronto, open to hybrid."
+          - "Work authorization: TN visa eligible. Looking for a US-based role."
+        negatives:
+          - "Freelance designer available for new clients. DM me for rates."
+          - "Our company is hiring a backend engineer. Apply now."
+          - "We’re an agency offering SEO services."
+          - "Can you help me improve my resume for jobs? (no self-promo post)"
+          - "How do I prepare for an interview next week?"
+          - "What’s a good salary range for a backend engineer?"
+          - "I’m hiring a contractor for a short project."
+          - "Looking for collaborators on a side project."
+          - "I posted a job opening on LinkedIn."
+          - "My employee onboarding starts Monday."
+          - "What’s the difference between FTE and contractor?"
+          - "I’m negotiating an offer and need advice."
+    - group: recruiting_hiring_request
+      description: Recruiting, hiring requests.
+      cues:
+        - "we are hiring"
+        - "we're hiring"
+        - "now hiring"
+        - "hiring"
+        - "recruiting"
+        - "seeking team members"
+        - "join our team"
+        - "job opening"
+        - "open role"
+        - "role available"
+        - "apply now"
+        - "send your resume"
+        - "send your cv"
+        - "careers page"
+        - "full-time"
+        - "part-time"
+        - "contract role"
+        - "remote role"
+        - "referrals welcome"
+      examples:
+        positives:
+          - "We’re hiring a senior iOS engineer. Apply now."
+          - "Hiring: data analyst (remote). Send your resume."
+          - "Now hiring for multiple roles. Join our team."
+          - "Recruiting volunteers for our dev team."
+        negatives:
+          - "I’m the hiring manager for my team."
+          - "How do I prepare for an interview?"
+          - "What’s the difference between recruiting and hiring?"
+          - "My company froze hiring this quarter."
+
+- group: data_collection_and_offplatform_funneling
+  description: "Data Collection & Off-Platform Funneling"
+  subgroups:
+    - group: survey_form_request
+      description: Requests for surveys, feedback, or data collection.
+      cues:
+        - "fill out this form"
+        - "please fill out"
+        - "questionnaire"
+        - "survey"
+        - "feedback form"
+        - "take this survey"
+        - "quick survey"
+        - "2-minute survey"
+        - "anonymous survey"
+        - "customer feedback"
+        - "rate your experience"
+        - "nps"
+        - "forms.gle"
+        - "typeform.com"
+        - "docs.google.com/forms"
+        - "google form"
+        - "survey link"
+      examples:
+        positives:
+          - "Please fill out this form: forms.gle/abcd"
+          - "We’d love your feedback. Take this quick survey."
+          - "Questionnaire for users: docs.google.com/forms/..."
+          - "Anonymous survey, takes 2 minutes. Link below."
+        negatives:
+          - "I filled out a survey earlier."
+          - "How do I build a Google Form?"
+          - "Survey results show increased retention."
+          - "We collected feedback via interviews, no form."
+    - group: research_recruitment
+      description: Recruiting participants for research studies.
+      cues:
+        - "research study"
+        - "research project"
+        - "participants needed"
+        - "participants wanted"
+        - "looking for participants"
+        - "recruiting participants"
+        - "study participants"
+        - "participate in research"
+        - "paid study"
+        - "compensated"
+        - "compensation"
+        - "gift card"
+        - "user study"
+        - "interview study"
+        - "focus group"
+        - "university study"
+        - "irb"
+        - "lab study"
+      examples:
+        positives:
+          - "Participants needed for a research study. $50 compensation."
+          - "Looking for participants for a user study. Gift card provided."
+          - "University research project recruiting volunteers. IRB-approved."
+          - "Participate in research: 30-min interview, compensated."
+        negatives:
+          - "I’m reading a research study about attention."
+          - "How do you recruit participants ethically?"
+          - "We ran an internal experiment with employees."
+          - "This paper describes a study with 200 participants."
+    - group: certification_or_course_funnel
+      description: Directing users to external certification programs or courses.
+      cues:
+        - "enroll"
+        - "enrol"
+        - "enroll now"
+        - "get certified"
+        - "certification"
+        - "certificate program"
+        - "course"
+        - "paid training"
+        - "bootcamp"
+        - "cohort"
+        - "limited seats"
+        - "tuition"
+        - "payment plan"
+        - "masterclass"
+        - "coaching program"
+        - "start learning"
+        - "join the program"
+        - "apply for the cohort"
+      examples:
+        positives:
+          - "Enroll in our paid training program and get certified."
+          - "Join the cohort-based course. Limited seats available."
+          - "Get certified in 6 weeks. Apply now."
+          - "Bootcamp enrollment is open. Tuition options in the link."
+        negatives:
+          - "I got certified last year."
+          - "How do certifications help your career?"
+          - "I’m building a free course for my team."
+          - "What’s the difference between a course and a bootcamp?"
+
+- group: low_signal_noise
+  description: "Low Signal / Noise"
+  subgroups:
+    - group: ask_to_ask
+      description: Asking whether it is okay to ask a question.
+      cues:
+        - "can i ask"
+        - "can i ask a question"
+        - "is it ok if"
+        - "is it okay if"
+        - "may i ask"
+        - "could i ask"
+        - "mind if i ask"
+        - "quick question, can i"
+        - "is it alright if"
+      examples:
+        positives:
+          - "Can I ask a quick question?"
+          - "Is it okay if I ask something here?"
+          - "Mind if I ask about your setup?"
+          - "May I ask a question regarding this?"
+        negatives:
+          - "What is the best way to do X?"
+          - "I have a question about Docker networking."
+          - "Here’s my question: why is this failing?"
+          - "Answer this: what’s 2 + 2?"
+    - group: channel_routing_request
+      description: >
+        Asking where something should be posted (which channel/room/thread), whether the current
+        channel is appropriate, or how to route a topic in a community. Meta “where do I put this?”
+        questions, not the content itself.
+      cues:
+        - "where can I post"
+        - "where should I post"
+        - "where do I post"
+        - "what channel should I post"
+        - "which channel should I post"
+        - "what channel is this for"
+        - "which channel is this for"
+        - "what channel is best for"
+        - "which channel is best for"
+        - "where can I share"
+        - "where should I share"
+        - "where do I share"
+        - "can I post this here"
+        - "should I post this here"
+        - "is it ok to post this here"
+        - "is this the right place"
+        - "is this the right channel"
+        - "is this the correct channel"
+        - "am I in the right channel"
+        - "wrong channel"
+        - "off topic"
+        - "where do I ask"
+        - "where should I ask"
+        - "where can I ask"
+        - "where do I submit"
+        - "where should I submit"
+        - "where do announcements go"
+        - "announcement channel"
+        - "where can I promote"
+        - "where should I promote"
+        - "where can I advertise"
+        - "where should I advertise"
+        - "where can I drop a link"
+        - "where should I drop a link"
+        - "can someone point me to the right channel"
+        - "what's the best place to post"
+        - "move this to"
+        - "which room"
+        - "where do I put this"
+
+      examples:
+        positives:
+          - "Hello everyone, where can I post information about hackathons?"
+          - "Is this the right channel to share job postings?"
+          - "Which channel should I use for project announcements?"
+          - "Where should I ask a question about Docker?"
+          - "Can someone point me to the correct place to post my event?"
+          - "Sorry if this is off topic, where do feature requests go?"
+          - "Where can I drop a link to a resource without spamming?"
+          - "Wrong channel? Where should this discussion be moved?"
+
+        negatives:
+          - "Here’s a hackathon happening next week: <details + link>"   # actual event promo
+          - "Join our hackathon Discord: discord.gg/..."                 # community invite
+          - "We are hiring data analysts. Apply here: <link>"            # recruiting post
+          - "Looking for collaborators for a hackathon project."         # collab request
+          - "What are some good hackathons to join this year?"           # recommendation query
+          - "How do I organize a hackathon?"                             # how-to question
+          - "Check out my project: <link>"                               # project promo
+          - "Can I ask a quick question?"                                # ask_to_ask
+
+    # This is temporarily commented out. The issue with linkdrops without context is that
+    # they can not be decided without surrounding messages, which makes labeling difficult.
+    # - group: "linkdrop_no_context"
+    #   description: Linkdrops without context or explanation.
+    #   cues:
+    #     - "check this out"
+    #     - "look at this"
+    #     - "found this"
+    #     - "this is interesting"
+    #     - "worth a read"
+    #     - "link:"
+    #     - "here you go:"
+    #     - "https://"
+    #     - "http://"
+    #     - "read this"
+    #     - "thought you'd like this"
+    #     - "sharing this"
+    #     - "~linkdrop"
+    #   examples:
+    #     positives:
+    #       - "Check this out: https://example.com"
+    #       - "Found this https://example.com/article"
+    #       - "This is interesting: http://example.org"
+    #       - "Worth a read https://example.net"
+    #     negatives:
+    #       - "This article explains TCP congestion control well: https://example.com (it covers Reno and CUBIC)."
+    #       - "Here’s a link to the docs for X: https://example.com/docs"
+    #       - "I found an article about pricing models and it argues for usage-based billing."
+    #       - "This link is about kernels. It helped me debug my issue."
+
+- group: information_and_learning_resource_request
+  description: "Information & Learning Resource Requests"
+  subgroups:
+    - group: "roadmap_request"
+      description: Requests for a roadmap to learn X.
+      cues:
+        - "roadmap to"
+        - "roadmap for"
+        - "how to learn"
+        - "learning path"
+        - "study plan"
+        - "curriculum"
+        - "where to start"
+        - "beginner path"
+        - "from scratch"
+        - "step-by-step"
+        - "milestones"
+        - "plan to learn"
+        - "guide to learn"
+      examples:
+        positives:
+          - "What’s a roadmap to learn Kubernetes?"
+          - "Can you give me a learning path for linear algebra?"
+          - "Where should I start if I want to learn Go from scratch?"
+          - "Build me a step-by-step plan to learn system design."
+        negatives:
+          - "What’s the product roadmap for Q2?"
+          - "Our roadmap includes features A, B, C."
+          - "We need a release plan for this app."
+          - "What’s the timeline for shipping?"
+    - group: "book_recommendation_request"
+      description: Requests for book recommendations.
+      cues:
+        - "book recommendations"
+        - "recommend a book"
+        - "books to read"
+        - "best books on"
+        - "good books on"
+        - "recommended reading"
+        - "reading list"
+        - "must-read"
+        - "suggest a book"
+        - "any textbooks"
+        - "textbook recommendations"
+        - "authors to read"
+        - "book list"
+      examples:
+        positives:
+          - "Any book recommendations on distributed systems?"
+          - "What are the best books on negotiation?"
+          - "Suggest a textbook for learning statistics."
+          - "Recommended reading for understanding capitalism?"
+        negatives:
+          - "I loved reading The Pragmatic Programmer."
+          - "This book is overrated."
+          - "I’m writing a book."
+          - "How do I summarize a book chapter?"
+    - group: "course_recommendation_request"
+      description: Requests for course recommendations.
+      cues:
+        - "course recommendations"
+        - "recommend a course"
+        - "best course on"
+        - "good course on"
+        - "online course"
+        - "class recommendations"
+        - "where can i learn"
+        - "udemy"
+        - "coursera"
+        - "edx"
+        - "mit ocw"
+        - "pluralsight"
+        - "codecademy"
+        - "bootcamp recommendation"
+        - "training course"
+      examples:
+        positives:
+          - "Recommend an online course for learning React."
+          - "What’s the best Coursera course on machine learning?"
+          - "Any good Udemy courses for Python?"
+          - "Course recommendations for finance basics?"
+        negatives:
+          - "My course starts next week."
+          - "I’m building a course curriculum."
+          - "What’s the difference between edX and Coursera?"
+          - "I took a course on React already."
+    - group: "youtube_video_recommendation_request"
+      description: Requests for YouTube video recommendations.
+      cues:
+        - "youtube video recommendations"
+        - "recommend youtube videos"
+        - "best youtube videos on"
+        - "youtube channel recommendations"
+        - "good youtube channels"
+        - "tutorial playlist"
+        - "youtube tutorial"
+        - "lecture series"
+        - "videos to learn"
+        - "recommend channels"
+        - "who should i watch"
+        - "best channels for"
+      examples:
+        positives:
+          - "Any YouTube channel recommendations for learning calculus?"
+          - "Best YouTube videos on Docker networking?"
+          - "Recommend a playlist to learn Blender."
+          - "What channels should I watch to learn guitar?"
+        negatives:
+          - "I watched a YouTube video about Docker."
+          - "How do I download a YouTube video?"
+          - "This lecture series is on Vimeo, not YouTube."
+          - "I don’t like YouTube tutorials."
+    - group: project_idea_request
+      description: >
+        Requests for ideas or brainstorming prompts for a project (hackathons, capstones,
+        portfolio projects). The user is asking "what should I build?" rather than seeking
+        collaborators or promoting an existing project.
+      cues:
+        - "suggest an idea"
+        - "give me an idea"
+        - "project idea"
+        - "hackathon idea"
+        - "idea for my hackathon"
+        - "what should I build"
+        - "what can I make"
+        - "capstone idea"
+        - "portfolio project idea"
+        - "any ideas for"
+        - "brainstorm"
+      examples:
+        positives:
+          - "Hey guys can anyone suggest an idea for my hackathon?"
+          - "Need a capstone project idea for data science."
+          - "What should I build this weekend to learn Rust?"
+        negatives:
+          - "Looking for a hackathon team/project to join."   # project_seeking_request
+          - "Looking for collaborators for my hackathon project." # collaboration_partnership_request
+          - "Check out my hackathon project: <link>"          # promo_product_or_project
+          - "Where should I post my hackathon announcement?"  # channel_routing_request
+    - group: dataset_resource_request
+      description: >
+        Requests for datasets or other research resources (public data, corpora, benchmarks),
+        often for a project, paper, or analysis. Domain-specific content is incidental; the
+        intent is finding data sources.
+      cues:
+        - "looking for datasets"
+        - "publicly available datasets"
+        - "where can I find datasets"
+        - "dataset for"
+        - "data sources"
+        - "benchmark dataset"
+        - "corpus"
+        - "open data"
+        - "research project"
+      examples:
+        positives:
+          - does anyone know a good kaggle dataset which can allow me to perform collaborative filtering for music recommendations?
+          - "I'm looking for datasets on bronchitis and pneumonia for my research project."
+          - "Any publicly available datasets for credit card fraud detection?"
+          - "Where can I find an open dataset of satellite imagery with labels?"
+        negatives:
+          - "Can you diagnose my pneumonia symptoms?"                 # medical advice / health support
+          - "Check out my dataset, link in bio!"                      # promo
+          - "Fill out my survey so I can collect data for my study."  # survey_form_request
+
+- group: community_and_learning
+  description: "Community formation around learning, practice, and peer support."
+  subgroups:
+    - group: study_group_request
+      description: >
+        Requests to join or form a study group, learning circle, accountability group, or
+        peer learning cohort (online or local). Typically about learning together, sharing
+        resources, doing practice problems, or beginner projects as part of studying.
+      cues:
+        # Direct study group terms
+        - "study group"
+        - "study buddy"
+        - "study partners"
+        - "study partner"
+        - "study together"
+        - "study with me"
+        - "learning group"
+        - "learning together"
+        - "learning circle"
+        - "reading group"
+        - "book club"               # when framed as studying/learning, not casual leisure
+        - "cohort"
+        - "accountability group"
+        - "accountability buddy"
+        - "peer learning"
+        - "study session"
+        - "weekly study"
+        - "daily study"
+        - "practice group"
+
+        # Beginner / journey framing often used
+        - "starting my journey"
+        - "beginner"
+        - "just started"
+        - "new to"
+        - "learning"
+        - "currently learning"
+        - "learning data science"
+        - "learning machine learning"
+        - "learning programming"
+        - "prep group"
+        - "exam prep group"
+        - "interview prep group"
+        - "leetcode group"          # study-oriented groups
+        - "coding practice group"
+
+        # Social intent markers
+        - "looking to connect"
+        - "connect with others"
+        - "meet others"
+        - "looking for people to learn with"
+        - "anyone want to learn together"
+        - "i'd love to join"
+        - "can i join"
+        - "looking for a group"
+        - "forming a group"
+
+      examples:
+        positives:
+          - "I’m starting my journey in ML and data science. Any study groups I can join?"
+          - "Looking for a study buddy to learn Python together."
+          - "Anyone want to form a weekly LeetCode study group?"
+          - "Is there a beginner-friendly learning group for React?"
+          - "I’d love to join a reading group for distributed systems papers."
+          - "Seeking an accountability group to study every morning."
+          - "Any interview prep groups currently active?"
+          - "New to cybersecurity, looking for people to learn with."
+
+        negatives:
+          - "Can you recommend a roadmap to learn machine learning?"          # roadmap_request
+          - "Can you recommend books on machine learning?"                    # book_recommendation_request
+          - "Looking for collaborators to build my startup MVP."              # collaboration_partnership_request
+          - "Looking for an open-source project to contribute to."            # project_seeking_request
+          - "Join our Discord community (invite link below)."                 # promo_community_invite
+          - "We are hiring interns for our ML team."                          # recruiting_hiring_request
+          - "Here’s my ML tutorial blog post, check it out."                  # promo_personal_blog_or_medium / educational resource
+          - "Anyone have the answers to this quiz?"                           # cheating_assistance_request
+
+- group: scams_and_suspicious_activity
+  description: "Scams & suspicious activity"
+  subgroups:
+    - group: phishing_scams_malware
+      description: Phishing, scams, or malware distribution.
+      cues:
+        - "urgent action required"
+        - "immediate action required"
+        - "verify your account"
+        - "confirm your account"
+        - "account suspended"
+        - "account locked"
+        - "unusual activity"
+        - "security alert"
+        - "password expired"
+        - "reset your password"
+        - "update your payment"
+        - "billing issue"
+        - "failed payment"
+        - "invoice attached"
+        - "document shared with you"
+        - "click this link"
+        - "click here"
+        - "login to view"
+        - "confirm your identity"
+        - "your mailbox is full"
+        - "email quota"
+        - "enable macros"
+        - "enable content"
+        - "download attachment"
+        - "install update"
+        - "apk download"
+        - "keygen"
+        - "crack"
+        - ".exe"
+        - ".apk"
+        - ".scr"
+        - ".iso"
+        - ".docm"
+        - ".xlsm"
+        - "bit.ly"
+        - "tinyurl"
+        - "~zip_file_link"
+        - "~exe_file_link"
+        - "~apk_file_link"
+        - "steam gift"
+        - "gift card"
+        - "free steam"
+        - "discord nitro"
+        - "free nitro"
+      examples:
+        positives:
+          - "Your account will be suspended. Verify your account now: bit.ly/xyz"
+          - "Security alert: unusual activity detected. Click here to login and confirm."
+          - "Invoice attached. Download and enable macros to view the document."
+          - "Install this update immediately (APK): http://example.com/app.apk"
+          - "Bro steam gift 50$ - [steamcommunity.com/gift-card/pay/50](https://sc.link/NawgS )\n@here @everyone"
+        negatives:
+          - "Use your bank’s official website to reset your password (don’t click random links)."
+          - "I received an invoice attached to an email at work."
+          - "How can I detect phishing emails?"
+          - "Our IT team sent a legitimate security alert internally."
+    - group: fraudulent_investment_opportunities
+      description: Promoting fraudulent money-making or investment schemes
+      cues:
+        - "get rich quick"
+        - "make money fast"
+        - "earn money online"
+        - "passive income"
+        - "financial freedom"
+        - "guaranteed returns"
+        - "guaranteed profit"
+        - "no risk"
+        - "risk-free"
+        - "double your money"
+        - "earn up to"
+        - "daily returns"
+        - "roi"
+        - "investment opportunity"
+        - "limited time offer"
+        - "exclusive investment"
+        - "vip group"
+        - "signals group"
+        - "copy trading"
+        - "binary options"
+        - "forex signals"
+        - "withdraw proof"
+        - "deposit now"
+        - "minimum deposit"
+        - "dm to join"
+      examples:
+        positives:
+          - "Guaranteed 10% daily returns. DM to join our VIP group."
+          - "No-risk investment opportunity. Double your money in a week."
+          - "Copy trading signals with guaranteed profit. Limited slots."
+          - "Earn up to $5,000/week from home. Deposit now to start."
+        negatives:
+          - "Index funds tend to outperform most active traders long-term."
+          - "What’s ROI and how do you calculate it?"
+          - "I invested in ETFs for retirement."
+          - "Is binary options trading legal in my country?"
+    - group: crypto_promo_or_shilling
+      description: Cryptocurrency promotion or shilling.
+      cues:
+        - "airdrop"
+        - "token presale"
+        - "presale"
+        - "ido"
+        - "ico"
+        - "whitelist"
+        - "wl spot"
+        - "mint"
+        - "nft drop"
+        - "nft mint"
+        - "to the moon"
+        - "pump"
+        - "moonshot"
+        - "buy the dip"
+        - "hodl"
+        - "staking"
+        - "yield"
+        - "liquidity"
+        - "tokenomics"
+        - "contract address"
+        - "ca:"
+        - "dex"
+        - "launchpad"
+        - "gm"
+        - "lfg"
+        - "wen"
+      examples:
+        positives:
+          - "New token presale is live. Join whitelist for an airdrop."
+          - "Mint opens tonight. NFT drop will sell out fast."
+          - "Buy the dip, this is going to the moon."
+          - "Contract address (CA): 0x123... Stake now for yield."
+        negatives:
+          - "Explain what an airdrop is in crypto."
+          - "How do smart contracts work?"
+          - "Crypto prices are volatile."
+          - "I’m studying tokenomics academically."
+    - group: account_rental_or_account_farming
+      description: Asking someone to share an account for a share of profits.
+      cues:
+        - "use your account"
+        - "rent your account"
+        - "lease your account"
+        - "account rental"
+        - "account farming"
+        - "aged account"
+        - "need a verified account"
+        - "verified account needed"
+        - "share your account"
+        - "let me use your"
+        - "i'll pay you"
+        - "percentage of profits"
+        - "% of my income"
+        - "split profits"
+        - "us/eu only"
+        - "us only"
+        - "eu only"
+        - "kyc"
+        - "id verification"
+        - "stripe account"
+        - "paypal account"
+        - "facebook ads account"
+        - "google ads account"
+        - "amazon seller account"
+      examples:
+        positives:
+          - "Need a US/EU collaborator to use your account. Split profits 30/70."
+          - "Rent me your verified Stripe account, I’ll pay monthly."
+          - "Looking for aged accounts. I’ll pay a percentage of income."
+          - "Can I use your PayPal account for withdrawals? You get a cut."
+        negatives:
+          - "How do I recover my own locked account?"
+          - "I’m sharing my Netflix with family."
+          - "Should I enable 2FA on my accounts?"
+          - "My Stripe account verification is failing, how do I fix it?"
+    - group: suspicious_job_offer_recruitment_scam
+      description: >
+        Suspicious job offers or recruiting messages that resemble common employment scams:
+        impersonation of well-known companies, unrealistic pay for low-skill roles, mass hiring,
+        vague job details, off-platform contact (DM/WhatsApp/Telegram), pressure/urgency, and
+        odd formatting. May be real in rare cases, but pattern strongly correlates with scams.
+
+      cues:
+        # Work-from-home bait + low-skill roles
+        - "work from home"
+        - "remote position"
+        - "hiring work from home"
+        - "data entry"
+        - "payroll assistant"
+        - "personal assistant"
+        - "virtual assistant"
+        - "customer service"
+        - "package handler (remote)"  # common scam phrasing
+        - "house sitter"
+        - "pet sitter"
+        - "copy and paste"
+        - "typing job"
+        - "no experience needed"
+        - "experience not needed"
+        - "training provided"
+        - "1 week training"
+        - "flexible hours"
+        - "start immediately"
+        - "immediate start"
+        - "hiring urgently"
+        - "limited slots"
+        - "recruiting 50"
+        - "recruiting 100"
+
+        # Too-good-to-be-true compensation / terms
+        - "pay rate"
+        - "$25/hr"
+        - "$25/ hr"
+        - "$30/hr"
+        - "$35/hr"
+        - "daily pay"
+        - "paid daily"
+        - "weekly pay"
+        - "payment: daily"
+        - "get paid weekly"
+        - "easy money"
+        - "quick money"
+        - "earn per day"
+        - "job cost: free"
+        - "registration fee"          # sometimes they claim “free” then later ask for a fee
+        - "background check fee"
+        - "processing fee"
+        - "training fee"
+
+        # Off-platform funneling / DM-only application
+        - "inbox me"
+        - "inbox me direct"
+        - "dm me"
+        - "message me for more info"
+        - "text me"
+        - "whatsapp"
+        - "telegram"
+        - "signal"
+        - "skype interview"
+        - "interview via chat"
+        - "contact the hiring manager"
+        - "add me"
+        - "link in bio"              # sometimes used for scam funnels
+
+        # Big-brand name dropping / impersonation patterns
+        - "amazon is hiring"
+        - "walmart is hiring"
+        - "apple is hiring"
+        - "google is hiring"
+        - "fedex is hiring"
+        - "ups is hiring"
+        - "dhl is hiring"
+        - "microsoft is hiring"
+        - "tesla is hiring"
+        - "company name + hiring"     # (use as a feature, not a hard rule)
+
+        # Scammy style/format indicators (common but not definitive)
+        - "kindly"
+        - "dear applicant"
+        - "congratulations"
+        - "selected"
+        - "shortlisted"
+        - "requirements provided by the company"
+        - "location: anywhere"
+        - "anywhere in the united state"
+        - "anywhere in the us and canada"
+        - "benefits offered: medical, vision, life"
+        - "typos: expierence"         # include as weak signal, not strict matching
+        - "lots of line breaks"
+        - "emoji bullets / checkbox bullets"
+
+        # Common downstream scam mechanics (often appear later)
+        - "we will send you a check"
+        - "mobile deposit"
+        - "buy equipment from our vendor"
+        - "purchase supplies"
+        - "gift card"
+        - "crypto"
+        - "you must pay first"
+        - "ssn"
+        - "bank account"
+        - "routing number"
+
+      examples:
+        positives:
+          - "Amazon is hiring for work from home... Pay Rate: $25/HR... Inbox me direct for more info."
+          - "Work from home data entry. No experience needed. Paid daily/weekly. DM me to apply."
+          - "We are recruiting 100 employees urgently. Flexible hours. Training provided. Text me on WhatsApp."
+          - "Congratulations you are selected. Interview via Telegram chat only. Start immediately."
+          - "Remote personal assistant job, $35/hr, equipment provided. Message the hiring manager."
+          - "Walmart work-from-home customer service. Apply by DM only. Limited slots."
+          - "Job cost: Free. Payment daily. Location anywhere in US/Canada. Inbox for details."
+          - "We will mail you a check to buy supplies from our vendor after you’re hired."
+          - "Kindly provide your SSN and bank details to proceed with onboarding."
+        negatives:
+          - "Amazon posted new roles on its careers site. Apply through the official portal."
+          - "Is this job offer a scam? They asked me to interview on Telegram."
+          - "My company is hiring remote support agents. Application is via our website."
+          - "I’m looking for a legitimate work-from-home job. Any advice?"
+          - "Here’s a job listing with requirements, interview rounds, and a company email domain."
+          - "We’re hiring 2 data entry temps through a staffing agency (apply on their site)."
+          - "I got a suspicious offer. What are the red flags?"
+          - "Discussion: why do data entry scams target job seekers?"
+
+- group: reality_detached_claims
+  description: Reality-detached / disruptive “extraordinary claims”
+  subgroups:
+    - group: conspiracy_theories_extreme_views
+      description: Promoting conspiracy theories or extreme views.
+      cues:
+        - "the government is hiding"
+        - "cover-up"
+        - "false flag"
+        - "deep state"
+        - "globalists"
+        - "cabal"
+        - "illuminati"
+        - "new world order"
+        - "nwo"
+        - "secret society"
+        - "mind control"
+        - "crisis actors"
+        - "they don't want you to know"
+        - "mainstream media lies"
+        - "msm"
+        - "hoax"
+        - "staged"
+        - "rigged"
+        - "vaccines cause"
+        - "chemtrails"
+        - "flat earth"
+        - "moon landing was faked"
+        - "5g causes"
+      examples:
+        positives:
+          - "The government is hiding the truth. It’s a massive cover-up."
+          - "That event was a false flag staged by the deep state."
+          - "Mainstream media lies, the real story is suppressed by the cabal."
+          - "Chemtrails are used for mind control, wake up."
+        negatives:
+          - "The government published a report with the investigation findings."
+          - "Misinformation spreads fast on social media."
+          - "How do you evaluate claims with evidence?"
+          - "This documentary discusses propaganda techniques historically."
+    - group: paranormal_supernatural_claims
+      description: Claims about paranormal or supernatural phenomena.
+      cues:
+        - "ghosts are real"
+        - "ghost"
+        - "haunted"
+        - "spirit"
+        - "spirits"
+        - "demon"
+        - "demonic"
+        - "possession"
+        - "poltergeist"
+        - "seance"
+        - "ouija"
+        - "psychic"
+        - "clairvoyant"
+        - "medium"
+        - "channeling"
+        - "telekinesis"
+        - "astral projection"
+        - "telepathy"
+        - "ufo sightings"
+        - "aliens have visited"
+        - "abduction"
+      examples:
+        positives:
+          - "My house is haunted, I keep seeing a ghost at night."
+          - "A psychic told me I have clairvoyant abilities."
+          - "We used a Ouija board and contacted spirits."
+          - "I can astral project and communicate telepathically."
+        negatives:
+          - "Ghostscript is causing errors in my PDF pipeline."
+          - "The movie had a haunted house plot."
+          - "I love paranormal fiction novels."
+          - "Is there any scientific evidence for telepathy?"
+    - group: extraordinary_health_claims
+      description: Extraordinary health or wellness claims.
+      cues:
+        - "miracle cure"
+        - "cure all diseases"
+        - "cure cancer"
+        - "reverse cancer"
+        - "detox your body"
+        - "cleanse toxins"
+        - "boost your immune system"
+        - "immune boost"
+        - "anti-aging secret"
+        - "reverse aging"
+        - "heal anything"
+        - "no side effects"
+        - "doctors don't want you to know"
+        - "big pharma is hiding"
+        - "natural remedy for"
+        - "alkaline water cures"
+        - "colloidal silver"
+        - "essential oils cure"
+        - "frequency healing"
+        - "energy healing"
+      examples:
+        positives:
+          - "This herb is a miracle cure that can cure all diseases."
+          - "Detox your body and reverse aging in 30 days."
+          - "Big pharma is hiding the real cure for cancer."
+          - "This natural remedy boosts your immune system and heals anything."
+        negatives:
+          - "Clinical trials show mixed results for this supplement."
+          - "How does the immune system work?"
+          - "I’m looking for evidence-based nutrition advice."
+          - "This treatment reduced symptoms for some patients in a study."
+    - group: doomsday_apocalyptic_predictions
+      description: Doomsday or apocalyptic predictions.
+      cues:
+        - "end of the world"
+        - "world will end on"
+        - "apocalypse is coming"
+        - "the end is near"
+        - "rapture"
+        - "end times"
+        - "global catastrophe"
+        - "mass extinction event"
+        - "cataclysm"
+        - "civilization collapse"
+        - "grid down"
+        - "emp attack"
+        - "ww3 is coming"
+        - "prepare for disaster"
+        - "stockpile"
+        - "doomsday"
+      examples:
+        positives:
+          - "The world will end on April 3rd. Prepare for disaster."
+          - "Apocalypse is coming, society is about to collapse."
+          - "A mass extinction event is imminent. The end is near."
+          - "Grid-down EMP attack soon. Stockpile supplies now."
+        negatives:
+          - "This movie is about an apocalypse."
+          - "What are historical examples of societal collapse?"
+          - "Emergency preparedness is useful for storms."
+          - "Scientists modeled asteroid impact probabilities."
+    - group: extraordinary_claims_unverifiable
+      description: Other extraordinary claims that are unverifiable.
+      cues:
+        - "i solved physics"
+        - "i solved quantum gravity"
+        - "perpetual motion"
+        - "free energy device"
+        - "i built agi"
+        - "i created god ai"
+        - "time travel is possible"
+        - "i built a time machine"
+        - "teleportation"
+        - "i can predict the lottery"
+        - "i proved god"
+        - "i can read minds"
+        - "i can control reality"
+      examples:
+        positives:
+          - "I built a perpetual motion machine that generates free energy."
+          - "I solved physics and unified all forces."
+          - "Time travel is possible and I built a time machine."
+          - "I can predict the lottery numbers with my method."
+        negatives:
+          - "I solved a hard bug in my compiler."
+          - "Here’s a speculative sci-fi idea about time travel."
+          - "I’m reading about unified field theory."
+          - "This proof addresses a known theorem, not everything."
+    - group: pseudoscience_jargon_soup
+      description: Use of pseudoscientific jargon without evidence.
+      cues:
+        - "quantum healing"
+        - "quantum consciousness"
+        - "energy vibrations"
+        - "raise your vibration"
+        - "frequency alignment"
+        - "chakra balancing"
+        - "crystal healing"
+        - "biofield therapy"
+        - "scalar waves"
+        - "tachyon energy"
+        - "orgone"
+        - "5d ascension"
+        - "dna activation"
+        - "water memory"
+        - "etheric"
+        - "morphic field"
+        - "vibrational medicine"
+        - "frequency detox"
+      examples:
+        positives:
+          - "Quantum healing realigns your biofield through energy vibrations."
+          - "Crystal healing balances chakras via frequency alignment."
+          - "Scalar waves and tachyon energy activate DNA and raise vibration."
+          - "Water memory plus quantum consciousness explains everything."
+        negatives:
+          - "Quantum computing uses qubits and unitary operations."
+          - "This paper discusses bioelectric fields in development."
+          - "Meditation helps some people relax."
+          - "Explain what chakras are in a cultural context."
+    - group: offtopic_philosophy_derail
+      description: Off-topic philosophical or metaphysical discussions that derail conversations.
+      cues:
+        - "what is the meaning of life"
+        - "meaning of life"
+        - "nature of reality"
+        - "what is reality"
+        - "existence of consciousness"
+        - "what is consciousness"
+        - "hard problem of consciousness"
+        - "free will"
+        - "do we have free will"
+        - "solipsism"
+        - "simulation hypothesis"
+        - "are we in a simulation"
+        - "metaphysical"
+        - "metaphysics"
+        - "ontology"
+        - "epistemology"
+        - "why do we exist"
+        - "what does it all mean"
+      examples:
+        positives:
+          - "What is the meaning of life, really?"
+          - "Are we living in a simulation? What is reality?"
+          - "Does consciousness exist outside the brain?"
+          - "Do we actually have free will or is it all deterministic?"
+        negatives:
+          - "What’s the best way to implement a scheduler?"
+          - "Explain the difference between threads and processes."
+          - "How do I fix this memory leak?"
+          - "What’s the deadline for the project?"
+
+- group: academic_integrity
+  description: "Academic Integrity & Assessment Misconduct"
+  subgroups:
+    - group: cheating_assistance_request
+      description: >
+        Requests that seek help cheating or evading academic rules: getting live exam answers,
+        bypassing proctoring, plagiarism/ghostwriting/contract cheating, answer keys/test banks,
+        or instructions to avoid detection (plagiarism or AI).
+      cues:
+        # Explicit cheating intent
+        - "cheat"
+        - "cheating"
+        - "help me cheat"
+        - "how to cheat"
+        - "cheat on the exam"
+        - "cheat on my test"
+        - "cheat on this quiz"
+        - "without getting caught"
+        - "not get caught"
+        - "undetectable"
+        - "untraceable"
+
+        # “Do it for me” academic work / contract cheating
+        - "do my homework"
+        - "do my assignment"
+        - "do my quiz"
+        - "take my exam"
+        - "take my test"
+        - "finish my exam"
+        - "write my essay"
+        - "write my paper"
+        - "write my lab report"
+        - "write my discussion post"
+        - "write my dissertation"
+        - "ghostwrite"
+        - "ghostwriter"
+        - "contract cheating"
+        - "impersonate"
+        - "proxy exam"
+        - "someone take my exam"
+        - "pay someone to take my exam"
+
+        # Answer key / leaks / test banks
+        - "answer key"
+        - "exam answers"
+        - "test answers"
+        - "quiz answers"
+        - "solutions for the test"
+        - "test bank"
+        - "question bank"
+        - "solutions manual"
+        - "leaked exam"
+        - "exam leak"
+        - "brain dump"
+        - "exam dump"
+        - "past paper answers"
+        - "copy answers"
+
+        # Plagiarism / evasion
+        - "plagiarize"
+        - "plagiarism"
+        - "paraphrase to avoid plagiarism"
+        - "rewrite to avoid turnitin"
+        - "bypass turnitin"
+        - "turnitin safe"
+        - "plagiarism-free"
+        - "make it pass plagiarism checker"
+
+        # AI-detection evasion (especially in academic context)
+        - "bypass ai detector"
+        - "avoid ai detection"
+        - "beat ai detection"
+        - "make it not look like ai"
+        - "humanize this so it won't be detected"
+        - "make it look like a student wrote it"
+
+        # Proctoring / lockdown circumvention
+        - "proctored exam"
+        - "online proctor"
+        - "remote proctoring"
+        - "lockdown browser"
+        - "respondus"
+        - "honorlock"
+        - "proctoru"
+        - "examity"
+        - "disable webcam"
+        - "fake webcam"
+        - "virtual camera"
+        - "second device"
+        - "how to hide notes"
+        - "how to look up answers during the exam"
+        - "screen sharing detection"
+
+        # Time-pressure cues common in live cheating
+        - "i'm taking it right now"
+        - "during the exam"
+        - "i have 10 minutes left"
+        - "timed quiz"
+        - "closed book but"
+
+      examples:
+        positives:
+          - "I’m in a proctored exam right now. How can I look up answers without getting caught?"
+          - "Can you give me the answers to this quiz? It’s timed."
+          - "Write my essay for me and make it plagiarism-free."
+          - "Paraphrase this so it bypasses Turnitin."
+          - "How do I bypass LockDown Browser / Respondus?"
+          - "I need the answer key for chapter 7."
+          - "Where can I download the test bank for this course?"
+          - "Solve these homework problems, but make it look like a student did it."
+          - "Can someone take my exam for me? I’ll pay."
+          - "Give me the exact solution only, no steps, so I can paste it into my submission."
+          - "How can I use a second device during online proctoring?"
+          - "Rewrite this so it doesn’t trigger AI detection."
+          - "What’s the easiest way to cheat on a closed-book midterm?"
+          - "Send me the leaked questions for tomorrow’s exam."
+          - "Make a cheat sheet for a closed-book exam where notes aren’t allowed."
+
+        negatives:
+          - "Can you explain how to solve this problem type so I can practice?"
+          - "Make me a study plan for my exam next week."
+          - "Create practice questions on this chapter and include solutions."
+          - "Can you review my essay outline and suggest improvements?"
+          - "Help me proofread this draft for clarity and grammar."
+          - "I want to learn this, can you show the steps and reasoning?"
+          - "My professor allows a one-page formula sheet. Help me summarize key formulas."
+          - "How do I cite sources correctly to avoid accidental plagiarism?"
+          - "Can you help me understand what I got wrong on this practice test?"
+          - "Explain the concept in simple terms, not just the final answer."
+          - "What does my school’s academic integrity policy usually cover?"
+          - "Is using old exams for studying okay if they were officially released?"
+          - "Help me create flashcards for these definitions."
+          - "Can you teach me a memorization technique for this material?"
+          - "I found an exam leak online. What should I do with it?"
+
+- group: politics_and_polarization
+  description: "Overtly political content: partisan advocacy, electioneering, political rants, culture-war bait, or ideological agitation."
+  subgroups:
+    - group: overly_political_content
+      description: >
+        Posts that primarily push or attack political parties/candidates/ideologies, campaign,
+        rally support, demonize opponents, or aggressively litigate hot-button political topics.
+        Includes culture-war slogans and “everything is political” soapboxing.
+
+      cues:
+        # Elections / campaigning
+        - "vote"
+        - "vote for"
+        - "vote out"
+        - "register to vote"
+        - "get out the vote"
+        - "go vote"
+        - "election"
+        - "elections"
+        - "primary"
+        - "general election"
+        - "ballot"
+        - "polls"
+        - "campaign"
+        - "campaigning"
+        - "rally"
+        - "donate"
+        - "canvassing"
+        - "phone bank"
+        - "grassroots"
+        - "political ad"
+        - "PAC"
+        - "super pac"
+
+        # Parties / ideology labels (broad + international-ish)
+        - "democrats"
+        - "republicans"
+        - "gop"
+        - "liberals"
+        - "conservatives"
+        - "labour"
+        - "tories"
+        - "ndp"
+        - "greens"
+        - "socialist"
+        - "communist"
+        - "libertarian"
+        - "left-wing"
+        - "right-wing"
+        - "far left"
+        - "far right"
+        - "progressive"
+        - "reactionary"
+        - "centrist"
+
+        # Government / institutions (when used for political argument)
+        - "president"
+        - "prime minister"
+        - "congress"
+        - "parliament"
+        - "senate"
+        - "supreme court"
+        - "constitutional"
+        - "executive order"
+        - "legislation"
+        - "bill"
+        - "ban"
+        - "mandate"
+        - "taxes"
+        - "gun control"
+        - "abortion"
+        - "immigration"
+        - "border"
+        - "police"
+        - "climate policy"
+
+        # Culture-war / polarization bait
+        - "woke"
+        - "anti-woke"
+        - "cancel culture"
+        - "political correctness"
+        - "snowflake"
+        - "sjw"
+        - "culture war"
+        - "identity politics"
+        - "virtue signaling"
+        - "propaganda"
+        - "mainstream media"
+        - "msm"
+        - "brainwashed"
+        - "indoctrination"
+        - "triggered"
+
+        # Rhetorical escalation signals (weak indicators, but useful)
+        - "wake up"
+        - "open your eyes"
+        - "they want you to"
+        - "destroying our country"
+        - "saving our country"
+        - "traitor"
+        - "fascist"
+        - "authoritarian"
+        - "dictator"
+        - "tyranny"
+        - "corrupt politicians"
+        - "deep state"
+
+        # Geopolitics (when presented as advocacy/rant, not neutral news)
+        - "war crimes"
+        - "sanctions"
+        - "occupation"
+        - "regime"
+        - "genocide"
+        - "imperialism"
+        - "proxy war"
+
+      examples:
+        positives:
+          - "If you don’t vote this year you’re part of the problem. Vote them out."
+          - "All conservatives are ruining the country and anyone who supports them is clueless."
+          - "This is what happens when liberals run everything. Wake up."
+          - "Donate to the campaign and help us win the election."
+          - "The Supreme Court is illegitimate and we need to pack it."
+          - "Cancel culture is destroying society, and the media is lying to you."
+          - "Immigration is an invasion, the border is wide open by design."
+          - "Climate policy is a scam to control you. Propaganda everywhere."
+          - "If you support that party, you’re a traitor."
+          - "This war is entirely the fault of [side], and anyone disagreeing is brainwashed."
+
+        negatives:
+          - "Office politics are exhausting."
+          - "I’m studying political science and need help understanding electoral systems."
+          - "Can you summarize this bill’s main provisions without commentary?"
+          - "We need to update company policies and compliance docs."
+          - "What are the main arguments for and against carbon taxes (neutral overview)?"
+          - "I don’t like talking politics at work."
+          - "The geopolitics section of the newspaper was interesting today."
+          - "Can you define ‘liberalism’ and ‘conservatism’ historically?"
+          - "This dataset is about voting behavior, can you help analyze it statistically?"
+          - "Explain how a parliamentary system differs from a presidential one."
+
+- group: community_governance_and_admin
+  description: "Administrative, moderation, and governance questions about a community/channel."
+  subgroups:
+    - group: admin_contact_or_permission_request
+      description: >
+        Requests to contact admins/moderators/staff, ask for permissions/approvals,
+        clarify rules/policies, request verification, report issues, or appeal moderation actions.
+        This is community administration (Discord/Slack/forum/channel), not system administration.
+
+      cues:
+        # Contacting admins/mods/staff
+        - "admin"
+        - "admins"
+        - "administrator"
+        - "moderator"
+        - "moderators"
+        - "mod"
+        - "mods"
+        - "staff"
+        - "admin team"
+        - "mod team"
+        - "community manager"
+        - "who runs this"
+        - "who manages this"
+        - "who can i contact"
+        - "who do i contact"
+        - "how can i reach"
+        - "how do i reach"
+        - "reach out to the admins"
+        - "contact the mods"
+        - "contact staff"
+
+        # Permissions / approvals
+        - "permission"
+        - "permissions"
+        - "approval"
+        - "approve"
+        - "allowed to post"
+        - "posting permission"
+        - "can i post"
+        - "can i share"
+        - "can i cross-post"
+        - "can i repost"
+        - "can i re-share"
+        - "can i syndicate"
+        - "can we partner"
+        - "partnership"
+        - "official permission"
+        - "authorized"
+        - "authorization"
+        - "consent"
+
+        # Rules / policies / governance
+        - "rules"
+        - "guidelines"
+        - "policy"
+        - "policies"
+        - "code of conduct"
+        - "coc"
+        - "terms"
+        - "is this allowed"
+        - "is this permitted"
+        - "is it against the rules"
+        - "report a user"
+        - "report this"
+        - "flag this"
+        - "complaint"
+        - "harassment"
+        - "spam report"
+        - "scam report"
+
+        # Appeals / enforcement outcomes
+        - "ban"
+        - "banned"
+        - "mute"
+        - "muted"
+        - "suspended"
+        - "appeal"
+        - "ban appeal"
+        - "unban"
+        - "warned"
+        - "warning"
+        - "strike"
+        - "moderation action"
+        - "why was my post removed"
+        - "post removed"
+        - "content removed"
+
+        # Admin requests common in channels
+        - "announcement"
+        - "announcements"
+        - "pin"
+        - "pinned"
+        - "verify"
+        - "verification"
+        - "role request"
+        - "assign me a role"
+        - "channel access"
+        - "invite"
+        - "invitation"
+        - "server invite"
+        - "partnership request"
+
+      examples:
+        positives:
+          - "Can I post your channel’s announcements through my channel?"
+          - "How can I reach out to the administration regarding a rule question?"
+          - "Who do I contact to get permission to post events here?"
+          - "Can a mod approve my post before I share it?"
+          - "Where do I file a ban appeal? I think I was muted by mistake."
+          - "What’s the best way to report spam to the moderators?"
+          - "Is cross-posting allowed if I credit the source?"
+          - "Can we partner channels and share announcements officially?"
+          - "My post got removed, who can I talk to about it?"
+          - "How do I request verification / a special role?"
+
+        negatives:
+          - "Hello everyone, where can I post information about hackathons?"  # channel_routing_request
+          - "Can I ask a quick question?"                                      # ask_to_ask
+          - "How do I contact Amazon customer support?"                        # not community admin
+          - "How do I contact my system administrator about VPN access?"       # IT/sysadmin
+          - "I’m a Linux admin, how do I manage user permissions?"             # sysadmin
+          - "Is it okay to share this blog post? (no admin contact implied)"   # could be content/promo
+          - "What are the server rules for Kubernetes RBAC?"                   # not community rules
+          - "Where should I post my job listing?"                              # routing, not admin contact (unless framed as approval)
+
+- group: high_signal_contribution
+  description: "High-effort, information-dense contributions that advance discussion."
+  subgroups:
+    - group: research_paper_discussion_high_signal
+      description: >
+        Posts that reference a research paper (or similarly credible technical source),
+        include a non-trivial summary or analysis in the author’s own words, and ask a
+        substantive question, critique, or extension. Not self-promo, not linkdrop.
+      cues:
+        # Scholarly/source markers
+        - "paper"
+        - "preprint"
+        - "publication"
+        - "pdf"
+        - "arxiv"
+        - "doi"
+        - "aclanthology"
+        - "openreview"
+        - "neurips"
+        - "icml"
+        - "iclr"
+        - "acl"
+        - "emnlp"
+        - "naacl"
+        - "findings"
+        - "proceedings"
+        - "appendix"
+        - "supplementary"
+
+        # Effort markers: summary/analysis framing
+        - "the idea is"
+        - "the method"
+        - "their approach"
+        - "they show"
+        - "results show"
+        - "baseline"
+        - "ablation"
+        - "experiment"
+        - "evaluation"
+        - "metric"
+        - "comparison"
+        - "limitations"
+        - "trade-off"
+        - "hypothesis"
+        - "this makes me think"
+        - "this brings me to"
+        - "my intuition"
+        - "i wonder if"
+        - "why doesn't"
+        - "any thoughts"
+        - "what do you think"
+
+        # Signal of original contribution (weak but useful)
+        - "i tried"
+        - "i tested"
+        - "i reproduced"
+        - "i implemented"
+        - "i replicated"
+        - "i compared"
+        - "here's my take"
+        - "here's my reasoning"
+
+      examples:
+        positives:
+          - "This paper proposes X. They compare against Y and show Z. Why doesn’t approach A do this instead? Link: <pdf>"
+          - "I read this ACL paper on compression-based classification. It works by ____. That makes me wonder how LLM context handling could incorporate compression. Thoughts?"
+          - "OpenReview paper: they claim method X improves sample efficiency. I think the key assumption is ____. Does this break under __?"
+          - "I reproduced the results on dataset D and got slightly different numbers. Here’s what changed. Any ideas why?"
+
+        negatives:
+          - "Interesting paper: <link>"                          # linkdrop_no_context (no summary)
+          - "Anyone got the PDF for this paper?"                # resource request
+          - "Check out my paper and follow me"                  # promo_product_or_project / blog promo
+          - "Can someone explain attention?"                    # generic question (not high-effort)
+          - "Here’s a random blog post, thoughts? <link>"       # may be blog promo or linkdrop unless summarized
+
+- group: community_meta
+  description: "Meta/community-structure content (introductions, housekeeping, onboarding)."
+  subgroups:
+    - group: self_introduction_new_member
+      description: >
+        Self-introduction posts where a user introduces themselves (name/background/skills/interests),
+        often as a newcomer. May include secondary requests (study group, projects, jobs, roadmap),
+        but the primary function is introduction / onboarding.
+      cues:
+        # Greeting + intro framing
+        - "hello everyone"
+        - "hi everyone"
+        - "hey everyone"
+        - "hello all"
+        - "hi all"
+        - "hey all"
+        - "greetings"
+        - "nice to meet you"
+        - "pleased to meet you"
+        - "new here"
+        - "new to the group"
+        - "new to this community"
+        - "just joined"
+        - "recently joined"
+        - "first time here"
+        - "introduction"
+        - "intro"
+
+        # Identity statements
+        - "my name is"
+        - "i'm"
+        - "i am"
+        - "call me"
+        - "i recently graduated"
+        - "i work as"
+        - "i'm a"
+        - "i am a"
+        - "background in"
+        - "currently studying"
+        - "i'm learning"
+        - "i am learning"
+        - "i have experience in"
+        - "my interests are"
+        - "i'm interested in"
+
+        # Common structure markers
+        - "a little about me"
+        - "about me"
+        - "here's a bit about"
+        - "brief introduction"
+        - "let me introduce myself"
+        - "thanks for having me"
+        - "glad to be here"
+        - "happy to join"
+
+      examples:
+        positives:
+          - "Hello everyone, my name is Abdul and I recently graduated in IT. I’m interested in data science..."
+          - "Hi all, I’m new here. I’m learning Python and excited to connect."
+          - "Hey everyone! Quick intro: I’m a frontend dev transitioning to ML."
+          - "Nice to meet you all. I’m just joining this community and wanted to introduce myself."
+          - "Hello! A little about me: I work in QA and I’m learning automation."
+
+        negatives:
+          - "Looking for a study group for ML, anyone interested?"          # study_group_request
+          - "What’s the roadmap to learn data science?"                     # roadmap_request
+          - "Freelancer available for work, DM me."                         # promo_services_for_hire
+          - "Where can I post hackathon announcements?"                     # channel_routing_request
+          - "We are hiring data analysts."                                  # recruiting_hiring_request
+
+- group: user_safety_and_crisis
+  description: "User safety & crisis content (risk of harm, urgent intervention, or destabilized mental state)."
+  subgroups:
+    - group: psychosis_delusional_paranoia
+      description: >
+        Reality-detached personal belief reports consistent with paranoia/psychosis:
+        being targeted, monitored, mind-controlled, implanted, hearing voices, telepathy,
+        hidden agents, etc. Typically framed as literal and immediate, with special knowledge,
+        and may include calls to action or fear-based warnings.
+      cues:
+        # Persecutory / surveillance delusions
+        - "they are watching me"
+        - "they're following me"
+        - "gangstalking"
+        - "implanted"
+        - "chip in my"
+        - "bugs in my body"
+        - "nanobots"
+        - "they read my thoughts"
+        - "mind control"
+        - "telepathy"
+        - "voices in my head"
+        - "they can make me feel emotions"
+        - "they have my DNA"
+        - "everyone who reads this will be harmed"
+        # Grandiose / bizarre tech claims framed as immediate reality
+        - "secret base"
+        - "they control the internet"
+        - "they can edit maps"
+        - "quantum weapon"
+        - "invisible to satellites"
+      examples:
+        positives:
+          - "There are people monitoring me through devices and they can hear my thoughts."
+          - "A group is controlling my body with signals and I can feel it happening."
+          - "They put something inside me and now I hear voices telling me what to do."
+          - "A secret organization is tracking everyone who reads my messages."
+        negatives:
+          - "I was diagnosed with schizophrenia and I’m trying to manage symptoms."
+          - "What are common symptoms of psychosis and how do people get help?"
+          - "This novel I'm writing has mind control and telepathy (fiction)."
+          - "I’m discussing conspiracy theories as a social phenomenon (not endorsing)."
+    - group: self_harm_or_suicidality
+      description: >
+        Content expressing self-harm or suicidal ideation/intent, past attempts, imminent risk,
+        or explicit desire to die. Includes vague ideation ("wish I were dead") through explicit intent.
+      cues:
+        - "suicide"
+        - "kill myself"
+        - "end my life"
+        - "end it all"
+        - "i want to die"
+        - "i wish i was dead"
+        - "can't go on"
+        - "no reason to live"
+        - "self harm"
+        - "self-harm"
+        - "hurt myself"
+        - "i harmed myself"
+        - "i cut myself"
+        - "overdose"
+        - "attempted"
+        - "i'm going to do it"
+        - "goodbye everyone"
+      examples:
+        positives:
+          - "I want to kill myself."
+          - "I self-harmed again last night."
+          - "I don’t want to be alive anymore."
+          - "I tried to end my life before and I’m scared I’ll do it again."
+        negatives:
+          - "I’m being too hard on myself and stuck in negative self-talk."
+          - "Life feels difficult lately but I’m not thinking about self-harm."
+          - "Discussion of suicide rates/statistics in a news context."
+          - "Fictional writing involving suicide (clearly framed as fiction)."
+    - group: self_harm_encouragement_or_glorification
+      description: >
+        Encouraging, mocking, or celebrating self-harm/suicide (directed at self or others),
+        including coercive "kys" style messages.
+      cues:
+        - "kill yourself"
+        - "kys"
+        - "you should die"
+        - "do it"
+        - "end it"
+        - "world would be better without you"
+        - "finally did it"
+        - "glad they died"
+      examples:
+        positives:
+          - "Kill yourself."
+          - "Do it already, nobody cares."
+          - "Good, they should have ended it."
+        negatives:
+          - "I’m worried about my friend who sounds suicidal. What should I do?"
+          - "This book portrays suicide, and I’m analyzing the theme."
+    - group: emotional_distress_negative_self_talk
+      description: >
+        Low-to-moderate acuity mental health distress: self-criticism, rumination, shame,
+        anxiety spirals, depression talk without explicit self-harm/suicide intent.
+        Often phrased as "I hurt myself with thoughts" or "I punish myself mentally."
+      cues:
+        - "negative thoughts"
+        - "i hate myself"
+        - "i'm worthless"
+        - "i'm a failure"
+        - "i'm so stupid"
+        - "self-sabotage"
+        - "ruminating"
+        - "can't stop overthinking"
+        - "self-inflicted"
+        - "i punish myself"
+        - "i judge myself"
+      examples:
+        positives:
+          - "I keep having negative thoughts about myself and it’s exhausting."
+          - "I’m constantly judging myself and it feels like self-inflicted pain."
+          - "I can’t stop spiraling and telling myself I’m worthless."
+        negatives:
+          - "I want to hurt myself physically."   # self_harm_or_suicidality
+          - "Kill yourself."                       # self_harm_encouragement_or_glorification
+
+- group: violence_and_targeting
+  description: "Violence, harm advocacy, and targeting (including doxxing)."
+  subgroups:
+    - group: violence_or_harm_advocacy
+      description: >
+        Encouraging, endorsing, organizing, or threatening physical harm to people or property.
+        Includes calls to attack/siege/assassinate, violent threats, and celebration of violence
+        in a way that promotes more harm. (Not: news discussion, prevention, or de-escalation.)
+      cues:
+        # Direct advocacy / incitement
+        - "someone should kill"
+        - "they deserve to die"
+        - "go attack"
+        - "go hurt"
+        - "beat them up"
+        - "shoot"
+        - "stab"
+        - "burn it down"
+        - "bomb"
+        - "lynch"
+        - "execute"
+        - "assassinate"
+        - "wipe them out"
+        - "exterminate"
+        - "siege"
+        - "hunt them"
+        - "take them out"
+        - "teach them a lesson"
+
+        # Threats (often overlap with advocacy in moderation flows)
+        - "i will kill you"
+        - "i'm going to hurt you"
+        - "you're dead"
+        - "watch your back"
+        - "i know where you live"
+
+        # Violence-adjacent mobilization
+        - "bring weapons"
+        - "armed"
+        - "attack plan"
+        - "target"
+        - "hit list"
+      examples:
+        positives:
+          - "Someone needs to go hurt them for what they did."
+          - "We should siege their building until they surrender."
+          - "They deserve to die. Make it happen."
+          - "I’m going to kill you when I see you."
+          - "Burn their office down."
+        negatives:
+          - "This news article describes an attack that happened yesterday."
+          - "How do I de-escalate a fight safely?"
+          - "I’m writing a novel and this character threatens someone (fiction context)."
+          - "What are warning signs someone might become violent?"
+          - "Self-defense laws vary by location, what’s the general idea? (non-actionable discussion)"
+    - group: doxxing_or_targeting
+      description: >
+        Sharing or requesting personal identifying information (PII) or actionable location info
+        about a person, or directing harassment toward a person (e.g., “go to their house,” “call
+        their employer”). Includes “soft doxxing” (workplace, neighborhood, school) and “targeting”
+        even without full PII when the intent is harassment or harm.
+      cues:
+        # Explicit doxxing language
+        - "dox"
+        - "doxx"
+        - "doxxing"
+        - "expose"
+        - "real name"
+        - "legal name"
+        - "home address"
+        - "address is"
+        - "phone number"
+        - "email address"
+        - "ip address"
+        - "social security"
+        - "passport"
+        - "driver's license"
+        - "license plate"
+        - "work address"
+        - "where they work"
+        - "where they live"
+        - "their family"
+
+        # Coordinates / maps / actionable location
+        - "coordinates"
+        - "latitude"
+        - "longitude"
+        - "gps"
+        - "google maps"
+        - "pin drop"
+        - "drop a pin"
+        - "map link"
+
+        # Targeting / harassment funnels
+        - "go to their house"
+        - "pay them a visit"
+        - "swat"
+        - "call their boss"
+        - "report them to"
+        - "spam them"
+        - "brigade"
+        - "mass report"
+      examples:
+        positives:
+          - "Here’s their home address and phone number. Do what you want with it."
+          - "Anyone know where this person lives? I want to confront them."
+          - "Their workplace is [company/location], go show up and film them."
+          - "I found their license plate number, spread it."
+          - "Here’s a map pin to their house. Pay them a visit."
+        negatives:
+          - "How do I protect myself from being doxxed online?"
+          - "This company’s customer support phone number is on their website."
+          - "Public figure’s official office address (already widely published and not used to harass)."
+          - "Can you help me report harassment to moderators/platform support?"
+          - "Here’s a general city-level location for an event (not about a person)."
+    - group: violent_threat_or_death_wish
+      description: >
+        Threats, intimidation, or wishes of death/physical harm directed at a person
+        (or their family/associates). Includes explicit threats ("I'll kill you") and
+        cruel death wishes ("I hope you die", "I hope your mom dies").
+        Excludes self-harm directives aimed at the target ("kys"), which belong under
+        self_harm_encouragement_or_glorification.
+      cues:
+        # Explicit threats
+        - "i will kill you"
+        - "i'm going to kill you"
+        - "i'll hurt you"
+        - "i'll beat you"
+        - "you're dead"
+        - "watch your back"
+        - "i'm coming for you"
+        # Death wishes / violent malice
+        - "i hope you die"
+        - "i hope you suffer"
+        - "die in a fire"
+        - "i hope your mom dies"
+        - "i hope your family dies"
+        - "i hope you get murdered"
+        # Implied harm (often paired with intimidation)
+        - "you'll regret this"
+        - "you'll pay for this"
+      examples:
+        positives:
+          - "I hope your mom dies in your arms."
+          - "You're dead. Watch your back."
+          - "I hope you die slowly."
+          - "I'm going to hurt you when I see you."
+        negatives:
+          - "This character says 'you're dead' in a fictional quote (clearly framed)."
+          - "News reporting about threats (non-endorsement)."
+          - "Kill yourself / kys"  # self_harm_encouragement_or_glorification
+
+- group: harassment_and_abuse
+  description: "Interpersonal abuse: insults, bullying, degrading remarks, and targeted harassment."
+  subgroups:
+    - group: harassment_personal_attack
+      description: >
+        Direct insults or derogatory statements aimed at a person (or a clear target), including
+        name-calling and demeaning character attacks. Not identity-based hate; just being nasty.
+      cues:
+        - "you're narcissistic"
+        - "you're pathetic"
+        - "you're disgusting"
+        - "idiot"
+        - "moron"
+        - "loser"
+        - "shut up"
+        - "nobody asked"
+        - "go away"
+        - "i hate you"
+      examples:
+        positives:
+          - "Because you're narcissistic."
+          - "You're a pathetic loser."
+          - "Shut up, nobody cares what you think."
+        negatives:
+          - "I disagree with your argument because..."
+          - "That idea doesn't make sense to me (no personal attack)."
+          - "Narcissism is discussed as a clinical topic, not aimed at a person."
+    - group: identity_or_health_based_derogation
+      description: >
+        Using identity, disability, neurotype, or mental health labels as insults or as a means
+        to demean a target (ableism/pathologizing). Includes “armchair diagnosis” when used to
+        insult or discredit someone ("you’re autistic", "you’re bipolar", "you’re a narcissist")
+        rather than a genuine clinical discussion.
+      cues:
+        # Disability / neurotype as insult
+        - "are you autistic"
+        - "you're autistic"
+        - "autist"
+        - "sperg"
+        - "retard"
+        - "brain damaged"
+        # Pathologizing / diagnosis-as-insult
+        - "narcissist"
+        - "narcissistic"
+        - "psychopath"
+        - "sociopath"
+        - "schizo"
+        - "bipolar"
+        - "borderline"
+        - "crazy"
+        - "insane"
+      examples:
+        positives:
+          - "So you're an autistic woman?"
+          - "You’re a narcissist, that’s why you act like this."
+          - "Stop being bipolar."
+        negatives:
+          - "I’m autistic and looking for coping strategies."
+          - "Narcissistic Personality Disorder is defined as..."
+          - "We’re discussing neurodiversity respectfully."
+
+- group: sexual_content_and_exploitation
+  description: "Sexual content, pornography promotion, and sexual exploitation risk (including CSAM-suspected)."
+  subgroups:
+    - group: adult_pornography_promotion
+      description: >
+        Promoting pornographic content or porn communities (servers/sites), including invites and linkdrops.
+        May include age-gating claims like “18+” but remains adult porn promo.
+      cues:
+        - "+18"
+        - "18+"
+        - "nsfw"
+        - "nudes"
+        - "nude"
+        - "leaks"
+        - "onlyfans"
+        - "xxx"
+        - "porn"
+      examples:
+        positives:
+          - "discord.gg/... Best server for nudes 18+ @here"
+          - "Join my NSFW server, leaks inside."
+        negatives:
+          - "This book discusses sexuality in literature (non-erotic)."
+          - "Sex education resources (non-explicit, non-pornographic)."
+    - group: csam_or_minor_sexual_content_suspected
+      description: >
+        Any content suggesting sexual content involving minors or “teen” pornography, even if framed as “18+”.
+        Includes invites/links, requests, trading, or “leaks” tied to minors. Treat as highest severity.
+      cues:
+        - "teen"          # when paired with sexual terms or porn contexts
+        - "underage"
+        - "barely legal"  # often adjacent; still high risk
+        - "schoolgirl"
+        - "minor"
+        - "young girl"
+        - "fresh"
+        - "loli"
+        - "cp"
+        - "kids"
+        - "child"
+        - "nudes"         # in combination with any minor-indicating term
+        - "leaks"         # in combination with minor-indicating term
+      examples:
+        positives:
+          - "discord invite advertising 'teen' + nudity"
+          - "Requests for sexual images of minors"
+        negatives:
+          - "Discussion about protecting minors online (safety-focused)."
+          - "News reporting about CSAM arrests (non-promotional)."
+
+- group: conversational_hygiene
+  description: "Short interaction-management messages (courtesies, acknowledgements, coordination)."
+  subgroups:
+    - group: gratitude_or_acknowledgement
+      description: >
+        Expressing thanks, appreciation, or acknowledgement for help/information.
+        Includes short gratitude replies ("thanks", "ty") and "karma/upvote" given as appreciation.
+        Excludes engagement solicitation ("please upvote") and sarcastic/hostile "thanks".
+      cues:
+        # Plain thanks
+        - "thanks"
+        - "thank you"
+        - "thanks man"
+        - "thanks mate"
+        - "ty"
+        - "thx"
+        - "tysm"
+        - "thanks for the help"
+        - "thanks for your help"
+        - "thanks for explaining"
+        - "appreciate it"
+        - "much appreciated"
+        - "appreciate your help"
+        - "cheers"
+        - "grateful"
+        - "🙏"
+        # “Giving karma” / positive feedback
+        - "upvoted"
+        - "take my upvote"
+        - "have an upvote"
+        - "gave you an upvote"
+        - "gave you karma"
+        - "here's some karma"
+        - "award"
+        - "gave you gold"
+        - "gave you silver"
+      examples:
+        positives:
+          - "Thanks man."
+          - "Thank you!"
+          - "Thanks for the help, that fixed it."
+          - "Much appreciated 🙏"
+          - "Upvoted. This was helpful."
+          - "Take my upvote."
+        negatives:
+          - "A few upvotes to the gold medal!!!"            # engagement_bait / solicitation
+          - "Thanks for nothing."                           # harassment / snark
+          - "No thanks."                                    # refusal/decline
+          - "Thanks, Obama."                                # sarcasm/political jab
+          - "Thanks, and also here's my project link..."    # promo_* (maybe multi-label)

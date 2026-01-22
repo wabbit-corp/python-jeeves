@@ -109,6 +109,17 @@ def _ensure_messages_mention_everyone(conn: sqlite3.Connection) -> None:
         )
 
 
+def _ensure_messages_reply_fields(conn: sqlite3.Connection) -> None:
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(messages)")}
+    if "reply_to_message_id" not in columns:
+        conn.execute("ALTER TABLE messages ADD COLUMN reply_to_message_id TEXT;")
+    if "reply_to_channel_id" not in columns:
+        conn.execute("ALTER TABLE messages ADD COLUMN reply_to_channel_id TEXT;")
+    if "reply_to_guild_id" not in columns:
+        conn.execute("ALTER TABLE messages ADD COLUMN reply_to_guild_id TEXT;")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_reply_to ON messages(reply_to_message_id);")
+
+
 def _ensure_channel_state_error_fields(conn: sqlite3.Connection) -> None:
     columns = {row["name"] for row in conn.execute("PRAGMA table_info(channel_state)")}
     if "error_count" not in columns:
@@ -350,6 +361,9 @@ def _init_db(conn: sqlite3.Connection) -> None:
             created_at INTEGER,
             edited_at INTEGER,
             deleted_at INTEGER,
+            reply_to_message_id TEXT,
+            reply_to_channel_id TEXT,
+            reply_to_guild_id TEXT,
             mention_ids TEXT,
             mention_everyone INTEGER,
             attachments_count INTEGER,
@@ -581,6 +595,7 @@ def _init_db(conn: sqlite3.Connection) -> None:
     _ensure_messages_deleted_at(conn)
     _ensure_messages_content_available(conn)
     _ensure_messages_mention_everyone(conn)
+    _ensure_messages_reply_fields(conn)
     _ensure_channel_state_error_fields(conn)
     _ensure_channel_state_thread_backoff(conn)
     _ensure_channel_state_disabled_fields(conn)
@@ -820,6 +835,23 @@ def _channel_row(channel: discord.abc.GuildChannel | discord.Thread, guild_id: i
     int,
     str | None,
 ]:
+    def _int_or_none(value: object) -> int | None:
+        if value is None:
+            return None
+        raw = getattr(value, "value", value)
+        if isinstance(raw, bool):
+            return int(raw)
+        if isinstance(raw, int):
+            return raw
+        if isinstance(raw, float):
+            return int(raw)
+        if isinstance(raw, str):
+            try:
+                return int(raw)
+            except ValueError:
+                return None
+        return None
+
     type_name = getattr(getattr(channel, "type", None), "name", None)
     if not type_name:
         type_name = str(getattr(channel, "type", "unknown"))
@@ -851,7 +883,65 @@ def _channel_row(channel: discord.abc.GuildChannel | discord.Thread, guild_id: i
         applied_tags = getattr(channel, "applied_tags", None)
         if applied_tags:
             extra["applied_tags"] = [str(tag.id) for tag in applied_tags if getattr(tag, "id", None) is not None]
-    extra_json = json.dumps(extra, ensure_ascii=True) if extra else None
+    else:
+        default_auto_archive_duration = _int_or_none(getattr(channel, "default_auto_archive_duration", None))
+        if default_auto_archive_duration is not None:
+            extra["default_auto_archive_duration"] = default_auto_archive_duration
+
+        flags = _int_or_none(getattr(channel, "flags", None))
+        if flags is not None:
+            extra["flags"] = flags
+
+        forum_cls = getattr(discord, "ForumChannel", None)
+        if isinstance(forum_cls, type) and isinstance(channel, forum_cls):
+            tags: list[JSON] = []
+            for tag in getattr(channel, "available_tags", []) or []:
+                tag_id = getattr(tag, "id", None)
+                if tag_id is None:
+                    continue
+                tags.append(
+                    {
+                        "id": str(tag_id),
+                        "name": getattr(tag, "name", None),
+                        "moderated": bool(getattr(tag, "moderated", False)),
+                    }
+                )
+            if tags:
+                extra["available_tags"] = tags
+
+            default_reaction_emoji = getattr(channel, "default_reaction_emoji", None)
+            if default_reaction_emoji is not None:
+                extra["default_reaction_emoji"] = str(default_reaction_emoji)
+
+            default_sort_order = _int_or_none(getattr(channel, "default_sort_order", None))
+            if default_sort_order is not None:
+                extra["default_sort_order"] = default_sort_order
+
+            default_forum_layout = _int_or_none(getattr(channel, "default_forum_layout", None))
+            if default_forum_layout is not None:
+                extra["default_forum_layout"] = default_forum_layout
+
+        voice_types: list[type] = []
+        voice_cls = getattr(discord, "VoiceChannel", None)
+        if isinstance(voice_cls, type):
+            voice_types.append(voice_cls)
+        stage_cls = getattr(discord, "StageChannel", None)
+        if isinstance(stage_cls, type):
+            voice_types.append(stage_cls)
+        if voice_types and isinstance(channel, tuple(voice_types)):
+            bitrate = _int_or_none(getattr(channel, "bitrate", None))
+            if bitrate is not None:
+                extra["bitrate"] = bitrate
+            user_limit = _int_or_none(getattr(channel, "user_limit", None))
+            if user_limit is not None:
+                extra["user_limit"] = user_limit
+            rtc_region = getattr(channel, "rtc_region", None)
+            if rtc_region is not None:
+                extra["rtc_region"] = str(rtc_region)
+            video_quality_mode = _int_or_none(getattr(channel, "video_quality_mode", None))
+            if video_quality_mode is not None:
+                extra["video_quality_mode"] = video_quality_mode
+    extra_json = json.dumps(extra, ensure_ascii=True, sort_keys=True) if extra else None
     return (
         str(channel.id),
         str(guild_id),
@@ -1139,6 +1229,40 @@ def _member_row(member: discord.Member, now: int, left_at: int | None = None) ->
     )
 
 
+def _reply_ref_from_message(message: discord.Message) -> tuple[str | None, str | None, str | None]:
+    ref = getattr(message, "reference", None)
+    if ref is None:
+        return None, None, None
+    message_id = getattr(ref, "message_id", None)
+    if message_id is None:
+        message_id = getattr(ref, "id", None)
+    if message_id is None:
+        return None, None, None
+    channel_id = getattr(ref, "channel_id", None)
+    guild_id = getattr(ref, "guild_id", None)
+    return (
+        str(message_id),
+        str(channel_id) if channel_id is not None else None,
+        str(guild_id) if guild_id is not None else None,
+    )
+
+
+def _reply_ref_from_payload(payload: JSONDict) -> tuple[str | None, str | None, str | None]:
+    message_reference = payload.get("message_reference")
+    if not isinstance(message_reference, dict):
+        return None, None, None
+    message_id = message_reference.get("message_id")
+    if message_id is None:
+        return None, None, None
+    channel_id = message_reference.get("channel_id")
+    guild_id = message_reference.get("guild_id")
+    return (
+        str(message_id),
+        str(channel_id) if channel_id is not None else None,
+        str(guild_id) if guild_id is not None else None,
+    )
+
+
 def _message_row(message: discord.Message, now: int) -> tuple[
     str,
     str,
@@ -1148,6 +1272,9 @@ def _message_row(message: discord.Message, now: int) -> tuple[
     int,
     int | None,
     int | None,
+    str | None,
+    str | None,
+    str | None,
     str,
     int,
     int,
@@ -1158,6 +1285,7 @@ def _message_row(message: discord.Message, now: int) -> tuple[
     mention_ids = _dedupe_ids([user.id for user in message.mentions])
     content = getattr(message, "content", None)
     content_available = 0 if content is None else 1
+    reply_to_message_id, reply_to_channel_id, reply_to_guild_id = _reply_ref_from_message(message)
     return (
         str(message.id),
         str(message.channel.id),
@@ -1167,6 +1295,9 @@ def _message_row(message: discord.Message, now: int) -> tuple[
         content_available,
         _to_epoch_ms(message.created_at),
         _to_epoch_ms(message.edited_at),
+        reply_to_message_id,
+        reply_to_channel_id,
+        reply_to_guild_id,
         json.dumps(mention_ids, ensure_ascii=True),
         int(bool(getattr(message, "mention_everyone", False))),
         len(message.attachments),
@@ -1175,10 +1306,25 @@ def _message_row(message: discord.Message, now: int) -> tuple[
     )
 
 
-def _message_row_from_payload(
-    payload: JSON, *, channel_id: str | None, guild_id: str | None
-) -> (
-    tuple[str, str | None, str | None, str | None, str | None, int, int | None, int | None, str, int, int, int, int]
+def _message_row_from_payload(payload: JSON, *, channel_id: str | None, guild_id: str | None) -> (
+    tuple[
+        str,
+        str | None,
+        str | None,
+        str | None,
+        str | None,
+        int,
+        int | None,
+        int | None,
+        str | None,
+        str | None,
+        str | None,
+        str | None,
+        int | None,
+        int | None,
+        int | None,
+        int | None,
+    ]
     | None
 ):
     if not isinstance(payload, dict):
@@ -1202,16 +1348,32 @@ def _message_row_from_payload(
     if created_at is None:
         created_at = _snowflake_timestamp_ms(message_id_str)
     edited_at = _parse_epoch_ms(payload.get("edited_timestamp"))
-    mentions = payload.get("mentions") or []
-    mention_ids = _extract_ids_from_payload(mentions)
-    mention_everyone = int(bool(payload.get("mention_everyone", False)))
-    attachments = payload.get("attachments") or []
-    if not isinstance(attachments, list):
-        attachments = []
-    embeds = payload.get("embeds") or []
-    if not isinstance(embeds, list):
-        embeds = []
-    pinned = int(bool(payload.get("pinned", False)))
+    reply_to_message_id, reply_to_channel_id, reply_to_guild_id = _reply_ref_from_payload(payload)
+
+    mention_ids_json: str | None = None
+    if "mentions" in payload:
+        mention_ids = _extract_ids_from_payload(payload.get("mentions") or [])
+        mention_ids_json = json.dumps(mention_ids, ensure_ascii=True)
+
+    mention_everyone: int | None = None
+    if "mention_everyone" in payload:
+        mention_everyone = int(bool(payload.get("mention_everyone", False)))
+
+    attachments_count: int | None = None
+    if "attachments" in payload:
+        attachments = payload.get("attachments")
+        attachments_list = attachments if isinstance(attachments, list) else []
+        attachments_count = len(attachments_list)
+
+    embeds_count: int | None = None
+    if "embeds" in payload:
+        embeds = payload.get("embeds")
+        embeds_list = embeds if isinstance(embeds, list) else []
+        embeds_count = len(embeds_list)
+
+    pinned: int | None = None
+    if "pinned" in payload:
+        pinned = int(bool(payload.get("pinned", False)))
     return (
         message_id_str,
         resolved_channel_id,
@@ -1221,10 +1383,13 @@ def _message_row_from_payload(
         content_available,
         created_at,
         edited_at,
-        json.dumps(mention_ids, ensure_ascii=True),
+        reply_to_message_id,
+        reply_to_channel_id,
+        reply_to_guild_id,
+        mention_ids_json,
         mention_everyone,
-        len(attachments),
-        len(embeds),
+        attachments_count,
+        embeds_count,
         pinned,
     )
 
@@ -1467,17 +1632,17 @@ def _upsert_channels(conn: sqlite3.Connection, rows: list[RowTuple]) -> None:
         VALUES
             (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(channel_id) DO UPDATE SET
-            guild_id = excluded.guild_id,
-            name = excluded.name,
-            type = excluded.type,
-            position = excluded.position,
-            parent_id = excluded.parent_id,
-            topic = excluded.topic,
-            nsfw = excluded.nsfw,
-            slowmode_delay = excluded.slowmode_delay,
-            created_at = excluded.created_at,
+            guild_id = COALESCE(excluded.guild_id, channels.guild_id),
+            name = COALESCE(excluded.name, channels.name),
+            type = COALESCE(excluded.type, channels.type),
+            position = COALESCE(excluded.position, channels.position),
+            parent_id = COALESCE(excluded.parent_id, channels.parent_id),
+            topic = COALESCE(excluded.topic, channels.topic),
+            nsfw = COALESCE(excluded.nsfw, channels.nsfw),
+            slowmode_delay = COALESCE(excluded.slowmode_delay, channels.slowmode_delay),
+            created_at = COALESCE(excluded.created_at, channels.created_at),
             updated_at = excluded.updated_at,
-            extra_json = excluded.extra_json
+            extra_json = COALESCE(excluded.extra_json, channels.extra_json)
         """,
         rows,
     )
@@ -1712,9 +1877,11 @@ def _upsert_messages(conn: sqlite3.Connection, rows: Sequence[RowTuple]) -> None
     conn.executemany(
         """
         INSERT INTO messages
-            (message_id, channel_id, guild_id, author_id, content, content_available, created_at, edited_at, mention_ids, mention_everyone, attachments_count, embeds_count, pinned)
+            (message_id, channel_id, guild_id, author_id, content, content_available, created_at, edited_at,
+             reply_to_message_id, reply_to_channel_id, reply_to_guild_id,
+             mention_ids, mention_everyone, attachments_count, embeds_count, pinned)
         VALUES
-            (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(message_id) DO UPDATE SET
             channel_id = COALESCE(excluded.channel_id, messages.channel_id),
             guild_id = COALESCE(excluded.guild_id, messages.guild_id),
@@ -1727,6 +1894,9 @@ def _upsert_messages(conn: sqlite3.Connection, rows: Sequence[RowTuple]) -> None
                     ELSE excluded.content_available
                 END,
             edited_at = COALESCE(excluded.edited_at, messages.edited_at),
+            reply_to_message_id = COALESCE(excluded.reply_to_message_id, messages.reply_to_message_id),
+            reply_to_channel_id = COALESCE(excluded.reply_to_channel_id, messages.reply_to_channel_id),
+            reply_to_guild_id = COALESCE(excluded.reply_to_guild_id, messages.reply_to_guild_id),
             mention_ids = COALESCE(excluded.mention_ids, messages.mention_ids),
             mention_everyone = COALESCE(excluded.mention_everyone, messages.mention_everyone),
             attachments_count = COALESCE(excluded.attachments_count, messages.attachments_count),
@@ -3744,6 +3914,7 @@ async def _index_message_payloads(
     *,
     channel_id: str | None,
     guild_id: str | None,
+    include_referenced_messages: bool = True,
 ) -> JSONDict:
     if not message_payloads:
         return {"messages_indexed": 0, "min_id": None, "max_id": None}
@@ -3758,6 +3929,13 @@ async def _index_message_payloads(
     channel_mention_rows: list[tuple[str, str]] = []
     users_by_id: dict[str, RowTuple] = {}
     message_ids: list[str] = []
+    attachments_seen: set[str] = set()
+    embeds_seen: set[str] = set()
+    reactions_seen: set[str] = set()
+    user_mentions_seen: set[str] = set()
+    role_mentions_seen: set[str] = set()
+    channel_mentions_seen: set[str] = set()
+    referenced_payloads: list[JSONDict] = []
 
     for payload in message_payloads:
         row = _message_row_from_payload(payload, channel_id=channel_id, guild_id=guild_id)
@@ -3767,50 +3945,76 @@ async def _index_message_payloads(
         message_id = row[0]
         message_ids.append(message_id)
 
-        attachments = payload.get("attachments") or []
-        if not isinstance(attachments, list):
-            attachments = []
-        attachment_rows.extend(
-            _attachment_rows_from_payload(
-                message_id=message_id,
-                channel_id=row[1],
-                guild_id=row[2],
-                attachments=attachments,
-                now=now,
-            )
-        )
+        if include_referenced_messages:
+            referenced_message = payload.get("referenced_message")
+            if isinstance(referenced_message, dict):
+                reply_to_message_id, reply_to_channel_id, reply_to_guild_id = _reply_ref_from_payload(payload)
+                patched = dict(referenced_message)
+                if "id" not in patched and reply_to_message_id is not None:
+                    patched["id"] = reply_to_message_id
+                if "channel_id" not in patched and reply_to_channel_id is not None:
+                    patched["channel_id"] = reply_to_channel_id
+                if "guild_id" not in patched and reply_to_guild_id is not None:
+                    patched["guild_id"] = reply_to_guild_id
+                referenced_payloads.append(patched)
 
-        embeds = payload.get("embeds") or []
-        if not isinstance(embeds, list):
-            embeds = []
-        embed_rows.extend(
-            _embed_rows_from_payload(
-                message_id=message_id,
-                embeds=embeds,
-                now=now,
+        if "attachments" in payload:
+            attachments_seen.add(message_id)
+            attachments = payload.get("attachments")
+            attachments_list = attachments if isinstance(attachments, list) else []
+            attachment_rows.extend(
+                _attachment_rows_from_payload(
+                    message_id=message_id,
+                    channel_id=row[1],
+                    guild_id=row[2],
+                    attachments=attachments_list,
+                    now=now,
+                )
             )
-        )
-        reaction_rows.extend(
-            _reaction_rows_from_payload(
-                message_id=message_id,
-                reactions=payload.get("reactions"),
-                now=now,
-            )
-        )
 
-        user_mention_rows.extend(_id_rows(message_id, _extract_ids_from_payload(payload.get("mentions") or [])))
-        role_mention_rows.extend(
-            _id_rows(
-                message_id,
-                _extract_ids_from_payload(payload.get("mention_roles") or []),
+        if "embeds" in payload:
+            embeds_seen.add(message_id)
+            embeds = payload.get("embeds")
+            embeds_list = embeds if isinstance(embeds, list) else []
+            embed_rows.extend(
+                _embed_rows_from_payload(
+                    message_id=message_id,
+                    embeds=embeds_list,
+                    now=now,
+                )
             )
-        )
-        channel_mention_rows.extend(
-            _id_rows(
-                message_id,
-                _extract_ids_from_payload(payload.get("mention_channels") or []),
+
+        if "reactions" in payload:
+            reactions_seen.add(message_id)
+            reaction_rows.extend(
+                _reaction_rows_from_payload(
+                    message_id=message_id,
+                    reactions=payload.get("reactions"),
+                    now=now,
+                )
             )
-        )
+
+        if "mentions" in payload:
+            user_mentions_seen.add(message_id)
+            user_mention_rows.extend(_id_rows(message_id, _extract_ids_from_payload(payload.get("mentions") or [])))
+
+        if "mention_roles" in payload:
+            role_mentions_seen.add(message_id)
+            role_mention_rows.extend(
+                _id_rows(
+                    message_id,
+                    _extract_ids_from_payload(payload.get("mention_roles") or []),
+                )
+            )
+
+        if "mention_channels" in payload:
+            channel_mentions_seen.add(message_id)
+            channel_mention_rows.extend(
+                _id_rows(
+                    message_id,
+                    _extract_ids_from_payload(payload.get("mention_channels") or []),
+                )
+            )
 
         user_row = _user_row_from_payload(payload.get("author"), now)
         if user_row is not None:
@@ -3819,15 +4023,13 @@ async def _index_message_payloads(
     if not message_rows:
         return {"messages_indexed": 0, "min_id": None, "max_id": None}
 
-    message_id_rows = [(message_id,) for message_id in message_ids]
-
     def _write(conn: sqlite3.Connection) -> None:
         _upsert_users(conn, list(users_by_id.values()))
         _upsert_messages(conn, message_rows)
-        if message_id_rows:
+        if attachments_seen:
             conn.executemany(
                 "DELETE FROM message_attachments WHERE message_id = ?",
-                message_id_rows,
+                [(message_id,) for message_id in attachments_seen],
             )
             if attachment_rows:
                 conn.executemany(
@@ -3839,9 +4041,10 @@ async def _index_message_payloads(
                     """,
                     attachment_rows,
                 )
+        if embeds_seen:
             conn.executemany(
                 "DELETE FROM message_embeds WHERE message_id = ?",
-                message_id_rows,
+                [(message_id,) for message_id in embeds_seen],
             )
             if embed_rows:
                 conn.executemany(
@@ -3853,9 +4056,10 @@ async def _index_message_payloads(
                     """,
                     embed_rows,
                 )
+        if reactions_seen:
             conn.executemany(
                 "DELETE FROM message_reactions WHERE message_id = ?",
-                message_id_rows,
+                [(message_id,) for message_id in reactions_seen],
             )
             if reaction_rows:
                 conn.executemany(
@@ -3867,9 +4071,10 @@ async def _index_message_payloads(
                     """,
                     reaction_rows,
                 )
+        if user_mentions_seen:
             conn.executemany(
                 "DELETE FROM message_user_mentions WHERE message_id = ?",
-                message_id_rows,
+                [(message_id,) for message_id in user_mentions_seen],
             )
             if user_mention_rows:
                 conn.executemany(
@@ -3881,9 +4086,10 @@ async def _index_message_payloads(
                     """,
                     user_mention_rows,
                 )
+        if role_mentions_seen:
             conn.executemany(
                 "DELETE FROM message_role_mentions WHERE message_id = ?",
-                message_id_rows,
+                [(message_id,) for message_id in role_mentions_seen],
             )
             if role_mention_rows:
                 conn.executemany(
@@ -3895,9 +4101,10 @@ async def _index_message_payloads(
                     """,
                     role_mention_rows,
                 )
+        if channel_mentions_seen:
             conn.executemany(
                 "DELETE FROM message_channel_mentions WHERE message_id = ?",
-                message_id_rows,
+                [(message_id,) for message_id in channel_mentions_seen],
             )
             if channel_mention_rows:
                 conn.executemany(
@@ -3912,6 +4119,25 @@ async def _index_message_payloads(
         conn.commit()
 
     await _with_db(ctx, _write)
+
+    if include_referenced_messages and referenced_payloads:
+        referenced_by_id: dict[str, JSONDict] = {}
+        for referenced_payload in referenced_payloads:
+            referenced_id = referenced_payload.get("id")
+            if referenced_id is None:
+                continue
+            referenced_id_str = str(referenced_id)
+            if referenced_id_str in message_ids:
+                continue
+            referenced_by_id[referenced_id_str] = referenced_payload
+        if referenced_by_id:
+            await _index_message_payloads(
+                ctx,
+                list(referenced_by_id.values()),
+                channel_id=None,
+                guild_id=None,
+                include_referenced_messages=False,
+            )
 
     numeric_ids: list[int] = []
     for message_id in message_ids:
