@@ -6,46 +6,53 @@ The entries below are derived from the git history and grouped by release date.
 
 ## [Unreleased]
 ### Added
-- Property-based tests for commitment and Brave Search helper logic.
-- Property-based tests for Brave Search API response stripping and search parameters.
-- Property-based tests for rate limiting, CODI message/annot parsing, and statistics utilities.
-- Strict typed_json coercion error-path tests.
-- CODI conversation and training export workflow documentation (`conversations.md`).
-- Hypothesis test dependency for coverage-focused testing (deptry ignore for test-only use).
-- Docker build/run support with `Dockerfile`, `docker-compose.yml`, and `.dockerignore`.
-- CODI auto-annotation tooling (`servant/modules/codi_auto_annotator.py`, `servant/scripts/codi_auto_annotate.py`).
-- CODI training export script from the indexer database (`servant/scripts/export_codi_training.py`).
+- CODI tooling and docs: auto-annotation, training export, and workflow notes (`conversations.md`).
+- Active learning annotation CLI for message datasets with contextual display and JSONL annotations (`make_train_data.py`).
+- Docker build/run support.
+- Expanded property-based test suite (Hypothesis) across Brave Search, rate limiting, CODI parsing, statistics, and typed_json coercion.
+- QA runner `check.py` (with `check.sh` delegation) plus import-linter/coverage config updates.
 - Local type stubs for emoji/imblearn/sklearn to improve type checking.
-- Python QA runner `check.py` mirroring `check.sh` output and behavior.
-- Parser self-tests in `check.py` using captured tool output fixtures.
-- Import-linter contracts and coverage configuration in `pyproject.toml`.
-- Property-based tests for typed_json coercion and CODI mention/content parsing branches.
+- Discord status post for the annotation pipeline and dataset progress (`post.md`).
+- Label examples from `labels.yml` now seed training with sample weights in `make_train_data.py`.
+- Label cue overlap helper script (`label_cue_overlap.py`).
+- Prefix rendering mode for per-author message chains in `make_train_data.py`, with render-spec tracking in embeddings and annotations.
+- Optional colorized annotation output for contexts and suggestions in `make_train_data.py`.
+- Random sampling and selection provenance fields for annotation batches in `make_train_data.py`.
+- Annotation timestamps now include `annotated_at` in `make_train_data.py`.
+- GPT-5.2 auto-annotation support with JSON schema output in `make_train_data.py`, showing auto labels before the prompt and accepting with `a`.
+- Message reply references (reply-to ids) now persist in the background indexer.
 ### Changed
-- QA runner entrypoint is now `check.py`; `check.sh` delegates to it.
-- QA runner `check.sh` now strips OSC/CSI sequences in logs, runs import-linter when available, and improves diff-cover/coverage summaries.
-- `check.py` now models tool output with per-tool issue dataclasses and parses JSON output when available.
-- `check.py` now requests mypy JSON output, parses diff-cover JSON reports, and consumes pytest JUnit XML for structured results.
-- `check.py` now supports quiet mode (SHOW_OUTPUT) and parallel execution (QA_JOBS) with a unified error table.
-- `check.py` now writes coverage XML into the log directory, parses branch coverage from Cobertura output, and prints a branch-first summary.
-- `check.py` unified errors now render source snippets with caret ranges and optional ANSI highlighting.
-- `check.py` bandit parsing now converts column offsets to 1-based spans for accurate caret ranges.
-- CODI/Servant JSON parsing tightened with `typed_json` coercion across models and views.
-- Pyright now reports import cycles as errors.
-- `check.py` now parses tool output into structured issues and prints normalized findings.
+- QA tooling now emits structured output, supports quiet/parallel runs, and improves coverage/error summaries.
+- JSON parsing and type checking tightened across CODI/Servant (import cycles now errors).
 - Coverage fail-under is now 15 to align with current baseline results.
-- `check.py` color output no longer depends on termcolor.
+- make_train_data now reads labels from labels.yml, formats timestamps in America/New_York, and adds annotation autocomplete/suggestions.
+- Word-salad weak labeling now uses a token Markov chain score with percentile thresholding to avoid over-labeling.
+- Annotation batch selection now supports a round-robin strategy across labels (toggle via CLI).
+- Weak label training now uses deterministic sample weights instead of randomized inclusion in `make_train_data.py`.
+- Round-robin candidate selection now shortlists uncertain messages to avoid full sorts in `make_train_data.py`.
+- Embedding cache keys now include render specs and rendered text hashes in `make_train_data.py`.
+- Weak-label cue matching now normalizes punctuation for better recall in `make_train_data.py`.
+- Annotation content hashes now follow the rendered text and mismatches are skipped by default in `make_train_data.py`.
+- Round-robin selection now preserves deterministic ordering for stable seeded batches in `make_train_data.py`.
+- Annotation batching now mixes in configurable random samples for evaluation-friendly labeling in `make_train_data.py`.
+- Annotation sessions now retrain models every 10 new labels by default to refresh suggestions mid-batch.
+- Annotation context now highlights weak label trigger spans in `make_train_data.py`.
+- Startup timing logs now cover each initialization step before the first annotation in `make_train_data.py`.
+- Weak label computation now skips entirely when `--weak-label-weight=0` to reduce startup time.
 ### Fixed
-- Broke CODI import cycles by moving community serialization into the model layer and using lightweight protocol types.
-- Centralized disentanglement feature registration/extraction to avoid feature module circular imports.
-- Tightened Brave Search tests to satisfy type checking and import ordering.
-- Updated test typing annotations and emoji stubs to satisfy mypy/pyright, and pointed pyright at the local `.venv`.
-- `check.py` now fails the suite when parsed error issues exist even if tools exit 0, and JSON payload extraction prefers the last payload (including JSON Lines).
-- `check.py` mypy parsing avoids name redefinition warnings and diff-cover uses the non-deprecated JSON format flag.
-- `check.py` unified errors no longer drop warnings on failed tools and now formats diff-cover/coverage/vulture issues cleanly.
-- `check.py` diff-cover file issues now omit non-violating files and show file names in unified error spans.
-- `check.py` summary states now pad before coloring for stable table alignment.
-- `check.py` diff-cover JSON parsing reports threshold failures; unified errors now sort issues and underline multi-line spans to end-of-line.
 - Guarded unigram probability computation against empty or fully-trimmed vocabularies to avoid runtime crashes.
+- Label cue matching now treats cues as regexes when needed and restores URL/link matchers in `make_train_data.py`.
+- Fixed label input tokenization so label names are parsed as whole tokens.
+- Excluded video file links from `~linkdrop` weak labeling in `make_train_data.py`.
+- Label cue matching now requires explicit `re:` prefixes for regex patterns so literal punctuation cues match reliably.
+- Timestamp formatting now supports ISO-8601 `created_at` values in `make_train_data.py`.
+- Literal cue matching now avoids substring matches (e.g., `cat` in `concatenate`) in `make_train_data.py`.
+- Prefix rendering now treats missing timestamps as boundaries in `make_train_data.py`.
+- Model training now logs total duration in `make_train_data.py`.
+- Auto-annotator schema now conforms to the Responses JSON schema subset in `make_train_data.py`.
+- Background message payload indexing no longer wipes embeds/attachments/mentions on partial updates.
+- Channel `extra_json` now keeps existing data and captures forum/voice/stage metadata.
+- Message reply index migration no longer fails when upgrading older databases.
 
 ## [2026-01-14]
 ### Added
