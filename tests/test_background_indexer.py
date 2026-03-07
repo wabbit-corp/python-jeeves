@@ -207,7 +207,7 @@ def test_upsert_channels_preserves_extra_json() -> None:
 
 def test_index_message_payloads_preserves_embeds_on_partial_payload(tmp_path: Path) -> None:
     db_path = tmp_path / "index.sqlite3"
-    ctx = GlobalContext(secrets={"indexer_db_path": str(db_path)})
+    ctx = GlobalContext(config={"indexer_db_path": str(db_path)})
 
     payload: JSONDict = {
         "id": "123",

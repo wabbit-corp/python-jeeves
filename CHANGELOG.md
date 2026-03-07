@@ -8,7 +8,12 @@ The entries below are derived from the git history and grouped by release date.
 ### Added
 - CODI tooling and docs: auto-annotation, training export, and workflow notes (`conversations.md`).
 - Active learning annotation CLI for message datasets with contextual display and JSONL annotations (`make_train_data.py`).
+- Evaluation mode for `make_train_data.py` to report per-label metrics on labeled data.
 - Docker build/run support.
+- Event channels module with admin-managed subscriptions that poll ICS calendars and YouTube feeds and post new items into Discord channels.
+- Indexed message search tool for querying the local Discord message index.
+- SQLite-backed LLM throttling policy and request-event log with Discord role exemptions for keeping specific users in high reasoning mode.
+- README docs for the LLM throttle schema, default seed values, and example `sqlite3` configuration commands.
 - Expanded property-based test suite (Hypothesis) across Brave Search, rate limiting, CODI parsing, statistics, and typed_json coercion.
 - QA runner `check.py` (with `check.sh` delegation) plus import-linter/coverage config updates.
 - Local type stubs for emoji/imblearn/sklearn to improve type checking.
@@ -21,10 +26,19 @@ The entries below are derived from the git history and grouped by release date.
 - Annotation timestamps now include `annotated_at` in `make_train_data.py`.
 - GPT-5.2 auto-annotation support with JSON schema output in `make_train_data.py`, showing auto labels before the prompt and accepting with `a`.
 - Message reply references (reply-to ids) now persist in the background indexer.
+- Commitment notes column plus a notes management tool for Vox reminders.
+- Voice invite handler that joins voice channels and transcribes speakers via Whisper (separate module).
+- Voice capture dependency for Discord voice receive plus PyNaCl runtime support.
+- External API connectivity checker script (`servant/scripts/check_external_apis.py`) with IPv4/IPv6 probes via aiohttp.
 ### Changed
 - QA tooling now emits structured output, supports quiet/parallel runs, and improves coverage/error summaries.
 - JSON parsing and type checking tightened across CODI/Servant (import cycles now errors).
 - Coverage fail-under is now 15 to align with current baseline results.
+- Event-channel ICS initialization now publishes a bounded backfill window (last 7 days and next 7 days) instead of silent seeding.
+- External API connectivity checker now probes Jupiter hosts and includes OPTIONS preflight checks.
+- Interactive Vox replies now downgrade only `reasoning_effort` when the global LLM request throttle trips, while Discord administrators and configured exempt roles stay on high reasoning.
+- New index DBs now seed the global LLM throttle row with a disabled but ready-to-enable default policy: more than 5 requests per hour downgraded to `low`, and untouched legacy seed rows migrate to that default.
+- Discord message context now includes author permission metadata when known, so Jeeves can distinguish staff/admin users in conversation payloads.
 - make_train_data now reads labels from labels.yml, formats timestamps in America/New_York, and adds annotation autocomplete/suggestions.
 - Word-salad weak labeling now uses a token Markov chain score with percentile thresholding to avoid over-labeling.
 - Annotation batch selection now supports a round-robin strategy across labels (toggle via CLI).
@@ -36,6 +50,8 @@ The entries below are derived from the git history and grouped by release date.
 - Round-robin selection now preserves deterministic ordering for stable seeded batches in `make_train_data.py`.
 - Annotation batching now mixes in configurable random samples for evaluation-friendly labeling in `make_train_data.py`.
 - Annotation sessions now retrain models every 10 new labels by default to refresh suggestions mid-batch.
+- Voice transcriber now disconnects after 60 seconds with no non-bot members in the channel.
+- Voice transcription defaults now chunk faster (shorter silence and max segment thresholds).
 - Annotation context now highlights weak label trigger spans in `make_train_data.py`.
 - Startup timing logs now cover each initialization step before the first annotation in `make_train_data.py`.
 - Weak label computation now skips entirely when `--weak-label-weight=0` to reduce startup time.
@@ -44,6 +60,7 @@ The entries below are derived from the git history and grouped by release date.
 - Label cue matching now treats cues as regexes when needed and restores URL/link matchers in `make_train_data.py`.
 - Fixed label input tokenization so label names are parsed as whole tokens.
 - Excluded video file links from `~linkdrop` weak labeling in `make_train_data.py`.
+- Commitment ownership overrides now recognize moderator/staff Discord permissions instead of requiring the `Administrator` bit.
 - Label cue matching now requires explicit `re:` prefixes for regex patterns so literal punctuation cues match reliably.
 - Timestamp formatting now supports ISO-8601 `created_at` values in `make_train_data.py`.
 - Literal cue matching now avoids substring matches (e.g., `cat` in `concatenate`) in `make_train_data.py`.
@@ -53,6 +70,9 @@ The entries below are derived from the git history and grouped by release date.
 - Background message payload indexing no longer wipes embeds/attachments/mentions on partial updates.
 - Channel `extra_json` now keeps existing data and captures forum/voice/stage metadata.
 - Message reply index migration no longer fails when upgrading older databases.
+- Commitment creation now defaults `end_date` to 30 days after `start_date` when omitted.
+- Voice transcriber sink now implements the required `wants_opus` hook and joins undeafened for audio capture.
+- External API connectivity checker now reports request timeouts instead of crashing.
 
 ## [2026-01-14]
 ### Added
@@ -83,6 +103,17 @@ The entries below are derived from the git history and grouped by release date.
 - Removed the `servant/modules/jove.py` personality module. (f88f280)
 - `own_code_issues` pulls the GitHub token from `servant.defs`. (f88f280)
 
+## [2026-01-30]
+### Added
+- Request-scoped context (`RequestContext`) with `ctx.with_request()` for tool permission checks. (unreleased)
+- Permission helpers with global admin allowlist support for Discord tools. (unreleased)
+- System-triggered Vox reply helper `ctx.request_vox_reply` for standard reply loop reuse. (unreleased)
+### Changed
+- Indexed message search and database export tools now require Discord administrator privileges. (unreleased)
+- Commitment management now enforces ownership/admin rules for create/update/cancel/list. (unreleased)
+- Renamed `ctx.secrets` to `ctx.config` for broader configuration storage. (unreleased)
+- Commitment check-ins now use the standard Vox reply loop instead of direct channel sends. (unreleased)
+
 ## [2025-12-27]
 ### Added
 - Repo introspection tools `own_code_ls`, `own_code_read`, and `own_code_grep` with root/path safeguards. (7cf8b39)
@@ -91,7 +122,7 @@ The entries below are derived from the git history and grouped by release date.
 - Added `SECRET_GITHUB_TOKEN` to the secret registry. (7cf8b39)
 ### Changed
 - System prompt now forbids @here/@everyone and points users to the GitHub repo for PRs; OpenAI calls request `reasoning_effort="high"`. (7cf8b39)
-- `own_code_issues` now requires `servant.secrets.SECRET_GITHUB_TOKEN` (removed fallback constant) and reads the token directly from ctx.secrets. (af21d8f, 9cce5ca)
+- `own_code_issues` now requires `servant.defs.SECRET_GITHUB_TOKEN` (removed fallback constant) and reads the token directly from ctx.config. (af21d8f, 9cce5ca)
 
 ## [2025-12-26]
 ### Added

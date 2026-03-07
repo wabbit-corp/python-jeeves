@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import logging
-from asyncio import AbstractEventLoop
+from asyncio import AbstractEventLoop, Event, Task
 from collections import defaultdict
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, TypeAlias
 
@@ -19,6 +19,7 @@ _LOGGER = logging.getLogger(__name__)
 
 
 AsyncToolCallback: TypeAlias = Callable[["GlobalContext", JSON], Awaitable[JSON]]
+VoxReplyFn: TypeAlias = Callable[[str, str, str], Awaitable[None]]
 
 SECRET_OPENAI_KEY = "openai.key"
 SECRET_USER_AGENT = "web.user-agent"
@@ -70,6 +71,22 @@ class RoutineTaskState:
     run_count: int = 0
 
 
+@dataclass(frozen=True)
+class RequestContext:
+    user_id: str
+    channel_id: str | None
+    guild_id: str | None
+    is_dm: bool
+
+
+@dataclass
+class CancelHandle:
+    message_id: str
+    user_id: str
+    cancel_event: Event
+    task: Task[None] | None = None
+
+
 @dataclass
 class Module:
     name: str
@@ -85,7 +102,7 @@ DiscordSendFn: TypeAlias = Callable[[str, str], Awaitable[None]]
 @dataclass
 class GlobalContext:
     openai_client: AsyncOpenAI | None = None
-    secrets: dict[str, JSON] = field(default_factory=dict)
+    config: dict[str, JSON] = field(default_factory=dict)
     modules: dict[str, Module] = field(default_factory=dict)
     module_state: dict[str, object] = field(default_factory=dict)
     channel_messages: dict[str, list[JSONDict]] = field(default_factory=lambda: defaultdict(list))
@@ -95,9 +112,15 @@ class GlobalContext:
 
     discord_loop: AbstractEventLoop | None = None
     discord_client: discord.Client | None = None
+    request: RequestContext | None = None
+    pending_cancels: dict[str, CancelHandle] = field(default_factory=dict)
+    request_vox_reply: VoxReplyFn | None = None
     _db_initialized: bool = False
     _indexer_last_sync_ts: float = 0.0
     _indexer_last_search_ts: float = 0.0
+
+    def with_request(self, request: RequestContext | None) -> "GlobalContext":
+        return replace(self, request=request)
 
 
 def discover_modules() -> dict[str, Module]:

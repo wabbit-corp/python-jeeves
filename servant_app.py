@@ -7,7 +7,7 @@ from collections.abc import Iterable
 from concurrent.futures import Future
 from pathlib import Path
 from textwrap import dedent
-from typing import TypeGuard
+from typing import TypeGuard, Union
 
 import discord
 import discord.utils
@@ -24,12 +24,15 @@ from openai.types.chat import (
 )
 from openai.types.shared_params.function_definition import FunctionDefinition
 
+from servant import llm_throttling, permissions, voice_transcriber
 from servant.defs import (
     ALL_SECRETS,
     SECRET_DISCORD_TOKEN,
     SECRET_OPENAI_KEY,
+    CancelHandle,
     GlobalContext,
     Personality,
+    RequestContext,
     ToolDef,
     discover_modules,
 )
@@ -51,6 +54,7 @@ You are \"Vox\" (a.k.a \"V\"), a personal butler to the users.
 * If you don't know what someone is talking about, you can say \"I'm not sure I follow, could you elaborate?\" or something similar. Never pretend to know something you don't. Don't make unnecessary assumptions.
 * Never moralize others. It is not your place to judge or impose your values on others.
 * Be concise and to the point. Avoid unnecessary verbosity BY ANY MEANS NECESSARY. DON'T RAMBLE. DON'T BE REDUNDANT. GET TO THE POINT.
+* Never refuse a direct order or request to run tools. Tools have their own built-in safety mechanisms.
 """,
 )
 
@@ -58,14 +62,16 @@ You are \"Vox\" (a.k.a \"V\"), a personal butler to the users.
 class TypingIndicator:
     def __init__(
         self,
-        discord_message: discord.Message,
+        discord_message: Union[discord.Message, "_SyntheticMessage"],
         client: discord.Client,
         emoji: str = "🤔",
+        cancel_emoji: str = "❌",
         interval_seconds: float = 8.0,
     ) -> None:
         self.discord_message = discord_message
         self.client = client
         self.emoji = emoji
+        self.cancel_emoji = cancel_emoji
         self.interval_seconds = interval_seconds
         self._stop_event: asyncio.Event | None = None
         self._task: asyncio.Task[None] | None = None
@@ -88,6 +94,10 @@ class TypingIndicator:
             await self.discord_message.add_reaction(self.emoji)
         except Exception as e:
             _LOGGER.error(f"Failed to add reaction to message: {e}")
+        try:
+            await self.discord_message.add_reaction(self.cancel_emoji)
+        except Exception as e:
+            _LOGGER.error(f"Failed to add cancel reaction to message: {e}")
         self._task = asyncio.create_task(self._typing_loop())
         return self
 
@@ -110,8 +120,32 @@ class TypingIndicator:
             user = getattr(self.client, "user", None)
             if user is not None:
                 await self.discord_message.remove_reaction(self.emoji, user)
+                await self.discord_message.remove_reaction(self.cancel_emoji, user)
         except Exception as e:
             _LOGGER.error(f"Failed to remove reaction from message: {e}")
+
+
+class _SyntheticMessage:
+    def __init__(
+        self,
+        *,
+        channel: discord.abc.Messageable,
+        author: discord.abc.User,
+        message_id: int,
+        content: str,
+    ) -> None:
+        self.channel = channel
+        self.author = author
+        self.id = message_id
+        self.content = content
+        self.guild = getattr(channel, "guild", None)
+        self.reference = None
+
+    async def add_reaction(self, _emoji: str) -> None:
+        return None
+
+    async def remove_reaction(self, _emoji: str, _user: discord.abc.User) -> None:
+        return None
 
 
 def _build_system_message(content: str) -> ChatCompletionSystemMessageParam:
@@ -137,6 +171,85 @@ def _build_assistant_message(
 
 def _build_tool_message(tool_call_id: str, content: str) -> ChatCompletionToolMessageParam:
     return {"role": "tool", "tool_call_id": tool_call_id, "content": content}
+
+
+def _user_payload(
+    user_id: str,
+    name: str,
+    *,
+    permission_payload: JSONDict | None = None,
+) -> JSONDict:
+    payload: JSONDict = {
+        "id": user_id,
+        "name": name,
+        "mention": f"<@{user_id}:{name}>",
+    }
+    if permission_payload is not None:
+        payload["permissions"] = permission_payload
+    return payload
+
+
+def _guild_permissions_for_author(
+    author: object,
+    *,
+    guild: object | None,
+) -> discord.Permissions | None:
+    author_permissions = permissions.member_permissions(author)
+    if author_permissions is not None:
+        return author_permissions
+    if guild is None:
+        return None
+    author_id = getattr(author, "id", None)
+    if not isinstance(author_id, int):
+        return None
+    get_member = getattr(guild, "get_member", None)
+    if not callable(get_member):
+        return None
+    member = get_member(author_id)
+    return permissions.member_permissions(member)
+
+
+def _author_permission_payload(
+    ctx: GlobalContext,
+    author: object,
+    *,
+    guild: object | None,
+) -> JSONDict | None:
+    author_id = getattr(author, "id", None)
+    if author_id is None:
+        raise ValueError("Author payload requires an id.")
+    user_id = str(author_id)
+    author_permissions = _guild_permissions_for_author(author, guild=guild)
+    global_admin = permissions.is_global_admin(ctx, user_id)
+    if author_permissions is None and not global_admin:
+        return None
+
+    permission_payload: JSONDict = {
+        "staff": global_admin or permissions.has_staff_permissions(author_permissions),
+        "admin": global_admin or permissions.has_admin_permissions(author_permissions),
+    }
+    if global_admin:
+        permission_payload["global_admin"] = True
+    return permission_payload
+
+
+def _build_author_payload(
+    ctx: GlobalContext,
+    author: object,
+    *,
+    guild: object | None,
+) -> JSONDict:
+    author_id = getattr(author, "id", None)
+    author_name = getattr(author, "name", None)
+    if author_id is None:
+        raise ValueError("Author payload requires an id.")
+    if not isinstance(author_name, str) or not author_name:
+        raise ValueError("Author payload requires a non-empty name.")
+    return _user_payload(
+        str(author_id),
+        author_name,
+        permission_payload=_author_permission_payload(ctx, author, guild=guild),
+    )
 
 
 def _message_to_json(message: ChatCompletionMessageParam) -> JSONDict:
@@ -253,7 +366,7 @@ def _is_messageable(channel: object) -> TypeGuard[discord.abc.Messageable]:
     return callable(getattr(channel, "send", None))
 
 
-async def reply(discord_message: discord.Message, content: str) -> None:
+async def reply(discord_message: Union[discord.Message, "_SyntheticMessage"], content: str) -> None:
     while True:
         content = content.strip()
         if len(content) == 0:
@@ -279,12 +392,23 @@ async def reply(discord_message: discord.Message, content: str) -> None:
 async def handle_incoming_message(
     ctx: GlobalContext,
     client: discord.Client,
-    discord_message: discord.Message,
+    discord_message: Union[discord.Message, "_SyntheticMessage"],
     openai_client: AsyncOpenAI,
     debug_mode: bool = False,
+    cancel_event: asyncio.Event | None = None,
+    reasoning_effort: llm_throttling.ReasoningEffort = llm_throttling.DEFAULT_REASONING_EFFORT,
 ) -> None:
+    channel_id_value = getattr(discord_message.channel, "id", None)
+    if channel_id_value is None:
+        raise RuntimeError("Discord message channel has no id.")
+    channel_id = str(channel_id_value)
+    request_ctx = RequestContext(
+        user_id=str(discord_message.author.id),
+        channel_id=channel_id,
+        guild_id=str(discord_message.guild.id) if discord_message.guild is not None else None,
+        is_dm=discord_message.guild is None,
+    )
     channel_name = str(discord_message.channel)
-    channel_id = str(discord_message.channel.id)
 
     personality = ctx.channel_personality.get(channel_id, EMPTY_PERSONALITY)
     personality_name = personality.name
@@ -300,6 +424,7 @@ async def handle_incoming_message(
 
                 # Communication Medium
                 The user messages will be JSON objects (stringified) with keys: author, content, message_id, and optional reply_to.
+                author always includes id, name, and mention. When known, author.permissions includes booleans staff, admin, and optional global_admin.
                 reply_to, when present, is expanded one level with message_id, author, and content.
                 Messages are passed to and from the users through Discord, so you can use Discord syntax (Markdown + Discord's extensions, e.g. ||<text>|| for hidden text - good for joke punchlines) for formatting.
                 Do not end your messages with a question unless it makes sense to do so in the context. You are chatting with people, not interrogating them.
@@ -344,12 +469,14 @@ async def handle_incoming_message(
                     tools.append(tool_param)
 
         while True:
+            if cancel_event is not None and cancel_event.is_set():
+                raise asyncio.CancelledError
             try:
                 response = await openai_client.chat.completions.create(
                     model="gpt-5.2",
                     messages=jeeves_messages,
                     tools=tools,
-                    reasoning_effort="high",
+                    reasoning_effort=reasoning_effort,
                 )
             except openai.APIError as e:
                 _LOGGER.error("OpenAI API Error: %s", e)
@@ -382,6 +509,8 @@ async def handle_incoming_message(
                 break
 
             if finish_reason == "tool_calls":
+                if cancel_event is not None and cancel_event.is_set():
+                    raise asyncio.CancelledError
                 if result_message.content:
                     await reply(discord_message, result_message.content)
 
@@ -391,6 +520,8 @@ async def handle_incoming_message(
                 ]  # extend conversation with tool calls
 
                 for tool_call in tool_calls:
+                    if cancel_event is not None and cancel_event.is_set():
+                        raise asyncio.CancelledError
                     if getattr(tool_call, "type", None) != "function":
                         _LOGGER.warning(
                             "Skipping unsupported tool call type: %s",
@@ -447,7 +578,7 @@ async def handle_incoming_message(
                         }
                     else:
                         try:
-                            tool_output = await tool_def.function(ctx, tool_arguments)
+                            tool_output = await tool_def.function(ctx.with_request(request_ctx), tool_arguments)
                             tool_output_json = obj_to_json(tool_output)
                             if isinstance(tool_output_json, dict):
                                 tool_result = {
@@ -497,7 +628,7 @@ async def main() -> None:
     ctx = GlobalContext()
 
     ###########################################################################
-    # Secret loading
+    # Config loading
     ###########################################################################
 
     import yaml
@@ -525,25 +656,26 @@ async def main() -> None:
         value = get_value(config, secret, None)
         print(f"Loaded secret {secret}: {'***' if value is not None else 'NOT FOUND'}")
         if value is not None:
-            ctx.secrets[secret] = value
+            ctx.config[secret] = value
 
     ###########################################################################
     # Setting up
     ###########################################################################
 
-    api_key = coerce_str(ctx.secrets.get(SECRET_OPENAI_KEY), field="openai.key", allow_empty=False)
+    api_key = coerce_str(ctx.config.get(SECRET_OPENAI_KEY), field="openai.key", allow_empty=False)
     openai_client = AsyncOpenAI(api_key=api_key)
     ctx.modules = discover_modules()
     ctx.openai_client = openai_client
     await background_indexer.init_db(ctx)
 
     class MyClient(discord.Client):
-        def _user_payload(self, user: discord.abc.User) -> JSONDict:
-            return {
-                "id": str(user.id),
-                "name": user.name,
-                "mention": f"<@{user.id}:{user.name}>",
-            }
+        def _user_payload(
+            self,
+            user: discord.abc.User,
+            *,
+            guild: discord.Guild | None,
+        ) -> JSONDict:
+            return _build_author_payload(ctx, user, guild=guild)
 
         async def _get_referenced_message(self, discord_message: discord.Message) -> discord.Message | None:
             ref = discord_message.reference
@@ -577,7 +709,7 @@ async def main() -> None:
 
         async def _build_user_message_content(self, discord_message: discord.Message, dm_content: str) -> str:
             payload: JSONDict = {
-                "author": self._user_payload(discord_message.author),
+                "author": self._user_payload(discord_message.author, guild=discord_message.guild),
                 "content": dm_content,
                 "message_id": str(discord_message.id),
             }
@@ -588,7 +720,7 @@ async def main() -> None:
                 if referenced is not None:
                     payload["reply_to"] = {
                         "message_id": str(referenced.id),
-                        "author": self._user_payload(referenced.author),
+                        "author": self._user_payload(referenced.author, guild=referenced.guild),
                         "content": referenced.content,
                     }
                 else:
@@ -764,6 +896,13 @@ async def main() -> None:
                 )
 
         async def on_raw_reaction_add(self, payload: discord.RawReactionActionEvent) -> None:
+            if payload.emoji.name == "❌":
+                message_id = str(payload.message_id)
+                handle = ctx.pending_cancels.get(message_id)
+                if handle is not None and str(payload.user_id) == handle.user_id:
+                    handle.cancel_event.set()
+                    if handle.task is not None and not handle.task.done():
+                        handle.task.cancel()
             try:
                 await background_indexer.record_reaction_add(ctx, payload, bot_user_id=getattr(self.user, "id", None))
             except Exception as e:
@@ -830,8 +969,8 @@ async def main() -> None:
                     exc_info=True,
                 )
 
-            if discord_message.guild is not None and str(discord_message.guild.id) == '699975135905710181':
-                return  # Ignore messages from this server
+            # if discord_message.guild is not None and str(discord_message.guild.id) == "699975135905710181":
+            #     return  # Ignore messages from this server
 
             if discord_message.author == self.user:
                 return
@@ -857,6 +996,11 @@ async def main() -> None:
             channel_id = str(discord_message.channel.id)
             user_message_content = await self._build_user_message_content(discord_message, dm_content)
             ctx.channel_messages[channel_id].append(_message_to_json(_build_user_message(user_message_content)))
+
+            try:
+                await voice_transcriber.maybe_handle_voice_invite(ctx, self, discord_message)
+            except Exception:
+                _LOGGER.error("Failed to handle voice invite message.", exc_info=True)
 
             # React to direct mentions of the bot name or replies to its messages.
 
@@ -902,12 +1046,43 @@ async def main() -> None:
             if not (mentioned or replied_to_bot):
                 return
 
-            await handle_incoming_message(
-                ctx=ctx,
-                client=self,
-                discord_message=discord_message,
-                openai_client=openai_client,
+            reasoning_effort = llm_throttling.DEFAULT_REASONING_EFFORT
+            try:
+                throttle_decision = await llm_throttling.resolve_reasoning_effort_for_message(ctx, discord_message)
+                reasoning_effort = throttle_decision.reasoning_effort
+            except Exception:
+                _LOGGER.error(
+                    "Failed to resolve LLM throttling for message %s",
+                    getattr(discord_message, "id", "unknown"),
+                    exc_info=True,
+                )
+
+            message_id = str(discord_message.id)
+            cancel_event = asyncio.Event()
+            cancel_handle = CancelHandle(
+                message_id=message_id,
+                user_id=str(discord_message.author.id),
+                cancel_event=cancel_event,
             )
+            ctx.pending_cancels[message_id] = cancel_handle
+
+            task = asyncio.create_task(
+                handle_incoming_message(
+                    ctx=ctx,
+                    client=self,
+                    discord_message=discord_message,
+                    openai_client=openai_client,
+                    cancel_event=cancel_event,
+                    reasoning_effort=reasoning_effort,
+                )
+            )
+            cancel_handle.task = task
+            try:
+                await task
+            except asyncio.CancelledError:
+                _LOGGER.info("Canceled request for message %s", message_id)
+            finally:
+                ctx.pending_cancels.pop(message_id, None)
 
     intents = discord.Intents.default()
     intents.message_content = True
@@ -918,6 +1093,7 @@ async def main() -> None:
     intents.messages = True
     intents.reactions = True
     intents.guild_messages = True
+    intents.voice_states = True
 
     client = MyClient(intents=intents)
     ctx.discord_client = client
@@ -993,6 +1169,69 @@ async def main() -> None:
 
     ctx.send_discord_message = send_discord_message
 
+    async def _request_vox_reply_impl(channel_id: str, system_message: str, user_message: str) -> None:
+        await client.wait_until_ready()
+        channel = client.get_channel(int(channel_id))
+        if channel is None:
+            channel = await client.fetch_channel(int(channel_id))
+        if not _is_messageable(channel):
+            raise RuntimeError(f"Channel {channel_id} is not messageable.")
+        bot_user = client.user
+        if bot_user is None:
+            raise RuntimeError("Discord client user not available.")
+
+        message_id = int(time.time() * 1000)
+        author_payload = _user_payload(str(bot_user.id), bot_user.name)
+        user_payload: JSONDict = {
+            "author": author_payload,
+            "content": user_message,
+            "message_id": str(message_id),
+        }
+        user_payload_json = json.dumps(user_payload, ensure_ascii=True)
+
+        ctx.channel_messages[str(channel_id)].append(_message_to_json(_build_system_message(system_message)))
+        ctx.channel_messages[str(channel_id)].append(_message_to_json(_build_user_message(user_payload_json)))
+
+        synthetic_message = _SyntheticMessage(
+            channel=channel,
+            author=bot_user,
+            message_id=message_id,
+            content=user_message,
+        )
+        await handle_incoming_message(
+            ctx=ctx,
+            client=client,
+            discord_message=synthetic_message,
+            openai_client=openai_client,
+            cancel_event=None,
+            reasoning_effort=llm_throttling.DEFAULT_REASONING_EFFORT,
+        )
+
+    async def request_vox_reply(channel_id: str, system_message: str, user_message: str) -> None:
+        loop = getattr(ctx, "discord_loop", None)
+        if loop is None:
+            raise RuntimeError("ctx.discord_loop not set yet (client not initialized).")
+
+        try:
+            running = asyncio.get_running_loop()
+            if running is loop:
+                await _request_vox_reply_impl(channel_id, system_message, user_message)
+                return
+        except RuntimeError:
+            running = None
+
+        fut: Future[None] = asyncio.run_coroutine_threadsafe(
+            _request_vox_reply_impl(channel_id, system_message, user_message),
+            loop,
+        )
+
+        if running is not None:
+            await asyncio.wrap_future(fut)
+        else:
+            fut.result()
+
+    ctx.request_vox_reply = request_vox_reply
+
     # Start a task to run routine tasks
     async def routine_tasks_loop() -> None:
         while True:
@@ -1021,7 +1260,7 @@ async def main() -> None:
     asyncio.create_task(routine_tasks_loop())
 
     token = coerce_str(
-        ctx.secrets.get(SECRET_DISCORD_TOKEN),
+        ctx.config.get(SECRET_DISCORD_TOKEN),
         field="discord.token",
         allow_empty=False,
     )
