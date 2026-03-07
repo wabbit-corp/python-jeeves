@@ -37,13 +37,18 @@ DISCORD_EPOCH_MS = 1420070400000
 DEFAULT_SEARCH_MAX_RESULTS = 200
 MAX_SEARCH_MAX_RESULTS = 5000
 DEFAULT_THREAD_DISCOVERY_RUN_EVERY_SECONDS = 300
+DEFAULT_LLM_THROTTLE_WINDOW_SECONDS = 60 * 60
+DEFAULT_LLM_THROTTLE_MAX_REQUESTS = 5
+DEFAULT_LLM_THROTTLE_DOWNGRADED_REASONING_EFFORT = "low"
+_LEGACY_LLM_THROTTLE_WINDOW_SECONDS = 300
+_LEGACY_LLM_THROTTLE_MAX_REQUESTS = 6
 
 RowTuple = tuple[object, ...]
 T = TypeVar("T")
 
 
 def _db_path(ctx: GlobalContext) -> Path:
-    raw = ctx.secrets.get("indexer_db_path")
+    raw = ctx.config.get("indexer_db_path")
     if raw:
         return Path(coerce_str(raw, field="indexer_db_path", allow_empty=False)).expanduser().resolve()
     return (Path.cwd() / DEFAULT_DB_FILENAME).resolve()
@@ -218,6 +223,31 @@ def _ensure_channels_extra_json(conn: sqlite3.Connection) -> None:
     columns = {row["name"] for row in conn.execute("PRAGMA table_info(channels)")}
     if "extra_json" not in columns:
         conn.execute("ALTER TABLE channels ADD COLUMN extra_json TEXT;")
+
+
+def _migrate_default_llm_throttle_policy(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        UPDATE llm_throttle_policy
+        SET window_seconds = ?,
+            max_requests = ?,
+            downgraded_reasoning_effort = ?
+        WHERE policy_id = 1
+          AND enabled = 0
+          AND window_seconds = ?
+          AND max_requests = ?
+          AND downgraded_reasoning_effort = ?
+          AND updated_at = 0
+        """,
+        (
+            DEFAULT_LLM_THROTTLE_WINDOW_SECONDS,
+            DEFAULT_LLM_THROTTLE_MAX_REQUESTS,
+            DEFAULT_LLM_THROTTLE_DOWNGRADED_REASONING_EFFORT,
+            _LEGACY_LLM_THROTTLE_WINDOW_SECONDS,
+            _LEGACY_LLM_THROTTLE_MAX_REQUESTS,
+            DEFAULT_LLM_THROTTLE_DOWNGRADED_REASONING_EFFORT,
+        ),
+    )
 
 
 def _migrate_timestamp_columns(conn: sqlite3.Connection) -> None:
@@ -590,6 +620,67 @@ def _init_db(conn: sqlite3.Connection) -> None:
         );
         """
     )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS llm_throttle_policy (
+            policy_id INTEGER PRIMARY KEY CHECK (policy_id = 1),
+            enabled INTEGER NOT NULL DEFAULT 0,
+            window_seconds INTEGER NOT NULL DEFAULT 3600,
+            max_requests INTEGER NOT NULL DEFAULT 5,
+            downgraded_reasoning_effort TEXT NOT NULL DEFAULT 'low',
+            updated_at INTEGER NOT NULL DEFAULT 0
+        );
+        """
+    )
+    conn.execute(
+        """
+        INSERT OR IGNORE INTO llm_throttle_policy
+            (policy_id, enabled, window_seconds, max_requests, downgraded_reasoning_effort, updated_at)
+        VALUES
+            (1, 0, ?, ?, ?, 0);
+        """,
+        (
+            DEFAULT_LLM_THROTTLE_WINDOW_SECONDS,
+            DEFAULT_LLM_THROTTLE_MAX_REQUESTS,
+            DEFAULT_LLM_THROTTLE_DOWNGRADED_REASONING_EFFORT,
+        ),
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS llm_request_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT NOT NULL,
+            guild_id TEXT,
+            channel_id TEXT,
+            message_id TEXT,
+            created_at INTEGER NOT NULL,
+            applied_reasoning_effort TEXT NOT NULL,
+            throttled INTEGER NOT NULL DEFAULT 0
+        );
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_llm_request_events_user_created "
+        "ON llm_request_events(user_id, created_at);"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_llm_request_events_created_at "
+        "ON llm_request_events(created_at);"
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS llm_high_reasoning_exempt_roles (
+            guild_id TEXT NOT NULL,
+            role_id TEXT NOT NULL,
+            created_at INTEGER NOT NULL,
+            PRIMARY KEY (guild_id, role_id)
+        );
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_llm_high_reasoning_exempt_roles_guild "
+        "ON llm_high_reasoning_exempt_roles(guild_id);"
+    )
     _ensure_guild_members_left_at(conn)
     _ensure_guild_members_last_seen_at(conn)
     _ensure_messages_deleted_at(conn)
@@ -609,6 +700,7 @@ def _init_db(conn: sqlite3.Connection) -> None:
     _ensure_guild_state_scan_completed_at(conn)
     _ensure_guild_state_error_fields(conn)
     _ensure_channels_extra_json(conn)
+    _migrate_default_llm_throttle_policy(conn)
     _migrate_timestamp_columns(conn)
     conn.commit()
 
@@ -786,7 +878,7 @@ def _bool_int_or_none(value: bool | None) -> int | None:
 
 
 def _get_int_config(ctx: GlobalContext, key: str, default: int) -> int:
-    raw = ctx.secrets.get(key)
+    raw = ctx.config.get(key)
     if raw is None:
         return default
     return coerce_int(raw, default)

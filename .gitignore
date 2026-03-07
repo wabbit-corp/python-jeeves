@@ -24,3 +24,6 @@ all_memes.json
 coverage.xml
 *.log
 *.bak
+/.DS_Store
+/*.jsonl
+/*.ipynb

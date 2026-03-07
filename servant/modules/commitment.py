@@ -7,7 +7,9 @@ import sqlite3
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TypeVar
 
+from servant import permissions
 from servant.defs import GlobalContext, RoutineTask, ToolDef
 from typed_json import JSON, JSONDict, coerce_int, coerce_str
 
@@ -21,6 +23,7 @@ MODULE_PROMPT = (
 DEFAULT_INTERVAL_DAYS = 5
 DEFAULT_DB_FILENAME = "servant_commitments.sqlite3"
 _WARNED_MISSING_COMMITMENT_COLUMNS: set[str] = set()
+T = TypeVar("T")
 
 
 # ----------------------------
@@ -31,9 +34,9 @@ _WARNED_MISSING_COMMITMENT_COLUMNS: set[str] = set()
 def _db_path(ctx: GlobalContext) -> Path:
     """
     Where to put the sqlite file.
-    Override by setting ctx.secrets['commitments_db_path'] to an absolute path.
+    Override by setting ctx.config['commitments_db_path'] to an absolute path.
     """
-    raw = ctx.secrets.get("commitments_db_path")
+    raw = ctx.config.get("commitments_db_path")
     if raw:
         return Path(coerce_str(raw, field="commitments_db_path", allow_empty=False)).expanduser().resolve()
     return (Path.cwd() / DEFAULT_DB_FILENAME).resolve()
@@ -152,6 +155,11 @@ def _ensure_commitments_columns(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE commitments ADD COLUMN last_checkin_date TEXT;")
         columns.add("last_checkin_date")
 
+    if "notes" not in columns:
+        _LOGGER.info("Adding missing column commitments.notes")
+        conn.execute("ALTER TABLE commitments ADD COLUMN notes TEXT;")
+        columns.add("notes")
+
     if "status" not in columns:
         _LOGGER.info("Adding missing column commitments.status")
         conn.execute("ALTER TABLE commitments ADD COLUMN status TEXT NOT NULL DEFAULT 'active';")
@@ -187,6 +195,7 @@ def _init_db(conn: sqlite3.Connection) -> None:
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL,
             description TEXT NOT NULL,
+            notes TEXT NULL,
             user_id TEXT NOT NULL,
             channel_id TEXT NOT NULL,
             start_date TEXT NOT NULL,               -- YYYY-MM-DD
@@ -223,6 +232,7 @@ class Commitment:
     id: int
     name: str
     description: str
+    notes: str | None
     user_id: str
     channel_id: str
     start_date: str
@@ -237,6 +247,7 @@ def _commitment_payload(commitment: Commitment) -> JSONDict:
         "id": commitment.id,
         "name": commitment.name,
         "description": commitment.description,
+        "notes": commitment.notes,
         "user_id": commitment.user_id,
         "channel_id": commitment.channel_id,
         "start_date": commitment.start_date,
@@ -274,6 +285,13 @@ def _row_to_commitment(r: sqlite3.Row) -> Commitment:
         last_checkin_date = None
         missing_optional.append("last_checkin_date")
 
+    if "notes" in keys:
+        raw_notes = r["notes"]
+        notes = str(raw_notes) if raw_notes is not None else None
+    else:
+        notes = None
+        missing_optional.append("notes")
+
     if "status" in keys and r["status"] is not None:
         status = str(r["status"])
     else:
@@ -295,6 +313,7 @@ def _row_to_commitment(r: sqlite3.Row) -> Commitment:
         id=int(r["id"]),
         name=str(r["name"]),
         description=str(r["description"]),
+        notes=notes,
         user_id=str(r["user_id"]),
         channel_id=str(r["channel_id"]),
         start_date=str(r["start_date"]),
@@ -305,10 +324,10 @@ def _row_to_commitment(r: sqlite3.Row) -> Commitment:
     )
 
 
-async def _with_db(ctx: GlobalContext, fn: Callable[[sqlite3.Connection], JSONDict]) -> JSONDict:
+async def _with_db(ctx: GlobalContext, fn: Callable[[sqlite3.Connection], T]) -> T:
     dbfile = _db_path(ctx)
 
-    def _run() -> JSONDict:
+    def _run() -> T:
         dbfile.parent.mkdir(parents=True, exist_ok=True)
         conn = _connect(dbfile)
         try:
@@ -318,6 +337,22 @@ async def _with_db(ctx: GlobalContext, fn: Callable[[sqlite3.Connection], JSONDi
             conn.close()
 
     return await asyncio.to_thread(_run)
+
+
+async def _fetch_owner_channel(ctx: GlobalContext, commitment_id: int) -> tuple[str, str]:
+    def _fetch(conn: sqlite3.Connection) -> tuple[str, str] | None:
+        row = conn.execute(
+            "SELECT user_id, channel_id FROM commitments WHERE id = ?",
+            (commitment_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        return str(row["user_id"]), str(row["channel_id"])
+
+    result = await _with_db(ctx, _fetch)
+    if result is None:
+        raise ValueError(f"Commitment id={commitment_id} not found.")
+    return result
 
 
 def _mention(user_id: str) -> str:
@@ -340,27 +375,71 @@ async def commitment_manage(ctx: GlobalContext, obj: JSON) -> JSONDict:
     """
     if not isinstance(obj, dict):
         raise ValueError("Input must be an object.")
+    payload = dict(obj)
 
-    op = obj.get("operation")
+    op = payload.get("operation")
     if op not in {"create", "update", "cancel", "list"}:
         raise ValueError("operation must be one of: create, update, cancel, list")
+
+    request = permissions.require_request(ctx)
+    request_user_id = request.user_id
+    is_global_admin = permissions.is_global_admin(ctx, request_user_id)
+
+    if op == "create":
+        user_id = str(payload["user_id"])
+        channel_id = str(payload["channel_id"])
+        if user_id != request_user_id and not is_global_admin:
+            await permissions.require_staff_for_channel(
+                ctx,
+                channel_id,
+                "create commitments for other users",
+            )
+
+    if op == "list":
+        channel_id_raw = payload.get("channel_id")
+        list_channel_id: str | None = str(channel_id_raw) if channel_id_raw is not None else None
+        channel_admin = False
+        if list_channel_id is not None and not is_global_admin:
+            channel_admin = await permissions.is_staff_for_channel(ctx, list_channel_id)
+        user_id_raw = payload.get("user_id")
+        list_user_id: str | None = str(user_id_raw) if user_id_raw is not None else None
+        if list_user_id is not None and list_user_id != request_user_id and not (channel_admin or is_global_admin):
+            raise PermissionError("Staff privileges required to list another user's commitments.")
+        if list_user_id is None and not (channel_admin or is_global_admin):
+            payload["user_id"] = request_user_id
+
+    if op in {"update", "cancel"}:
+        cid = _require_int(payload, "commitment_id")
+        owner_id, channel_id = await _fetch_owner_channel(ctx, cid)
+        if owner_id != request_user_id and not is_global_admin:
+            await permissions.require_staff_for_channel(
+                ctx,
+                channel_id,
+                "modify another user's commitments",
+            )
 
     def _logic(conn: sqlite3.Connection) -> JSONDict:
         now = _now_ms()
 
         if op == "create":
-            name = str(obj["name"])
-            description = str(obj["description"])
-            user_id = str(obj["user_id"])
-            channel_id = str(obj["channel_id"])
-            start_date = str(obj.get("start_date") or _today_yyyy_mm_dd())
-            end_date = str(obj["end_date"]) if "end_date" in obj else None
-            interval_days = coerce_int(obj.get("interval_days"), DEFAULT_INTERVAL_DAYS)
+            name = str(payload["name"])
+            description = str(payload["description"])
+            user_id = str(payload["user_id"])
+            channel_id = str(payload["channel_id"])
+            start_date = str(payload.get("start_date") or _today_yyyy_mm_dd())
+            end_date_raw = payload.get("end_date")
+            end_date = str(end_date_raw) if end_date_raw is not None else None
+            interval_days = coerce_int(payload.get("interval_days"), DEFAULT_INTERVAL_DAYS)
             if interval_days <= 0:
                 interval_days = DEFAULT_INTERVAL_DAYS
 
             sd = _parse_date(start_date)
-            ed = _parse_date(end_date) if end_date else sd + dt.timedelta(days=30)
+            if end_date:
+                ed = _parse_date(end_date)
+                end_date = ed.isoformat()
+            else:
+                ed = sd + dt.timedelta(days=30)
+                end_date = ed.isoformat()
             if ed < sd:
                 raise ValueError("end_date must be >= start_date")
 
@@ -396,7 +475,7 @@ async def commitment_manage(ctx: GlobalContext, obj: JSON) -> JSONDict:
             }
 
         if op == "update":
-            cid = _require_int(obj, "commitment_id")
+            cid = _require_int(payload, "commitment_id")
 
             # Build dynamic update set from provided fields.
             allowed = {
@@ -414,15 +493,15 @@ async def commitment_manage(ctx: GlobalContext, obj: JSON) -> JSONDict:
             update_params: list[object] = []
 
             for k, col in allowed.items():
-                if k in obj and obj[k] is not None:
+                if k in payload and payload[k] is not None:
                     sets.append(f"{col} = ?")
-                    update_params.append(obj[k])
+                    update_params.append(payload[k])
 
             if not sets:
                 raise ValueError("No updatable fields provided.")
 
             # Validate date logic if either date is changing.
-            if ("start_date" in obj) or ("end_date" in obj):
+            if ("start_date" in payload) or ("end_date" in payload):
                 existing = conn.execute(
                     "SELECT start_date, end_date FROM commitments WHERE id = ?",
                     (cid,),
@@ -430,8 +509,8 @@ async def commitment_manage(ctx: GlobalContext, obj: JSON) -> JSONDict:
                 if not existing:
                     raise ValueError(f"Commitment id={cid} not found.")
 
-                start_date = str(obj.get("start_date") or existing["start_date"])
-                end_date = str(obj.get("end_date") or existing["end_date"])
+                start_date = str(payload.get("start_date") or existing["start_date"])
+                end_date = str(payload.get("end_date") or existing["end_date"])
 
                 sd = _parse_date(start_date)
                 ed = _parse_date(end_date)
@@ -457,7 +536,7 @@ async def commitment_manage(ctx: GlobalContext, obj: JSON) -> JSONDict:
             }
 
         if op == "cancel":
-            cid = _require_int(obj, "commitment_id")
+            cid = _require_int(payload, "commitment_id")
             cur = conn.execute(
                 """
                 UPDATE commitments
@@ -486,15 +565,15 @@ async def commitment_manage(ctx: GlobalContext, obj: JSON) -> JSONDict:
         where = []
         params: list[str] = []
 
-        if "user_id" in obj and obj["user_id"] is not None:
+        if "user_id" in payload and payload["user_id"] is not None:
             where.append("user_id = ?")
-            params.append(str(obj["user_id"]))
-        if "channel_id" in obj and obj["channel_id"] is not None:
+            params.append(str(payload["user_id"]))
+        if "channel_id" in payload and payload["channel_id"] is not None:
             where.append("channel_id = ?")
-            params.append(str(obj["channel_id"]))
-        if "status" in obj and obj["status"] is not None:
+            params.append(str(payload["channel_id"]))
+        if "status" in payload and payload["status"] is not None:
             where.append("status = ?")
-            params.append(str(obj["status"]))
+            params.append(str(payload["status"]))
 
         clause = ("WHERE " + " AND ".join(where)) if where else ""
         rows = conn.execute(
@@ -505,6 +584,74 @@ async def commitment_manage(ctx: GlobalContext, obj: JSON) -> JSONDict:
         return {
             "ok": True,
             "commitments": [_commitment_payload(_row_to_commitment(r)) for r in rows],
+        }
+
+    return await _with_db(ctx, _logic)
+
+
+async def commitment_notes_manage(ctx: GlobalContext, obj: JSON) -> JSONDict:
+    """
+    Update Vox's internal notes for a commitment.
+    """
+    if not isinstance(obj, dict):
+        raise ValueError("Input must be an object.")
+    payload = dict(obj)
+
+    op = payload.get("operation")
+    if op not in {"set", "append", "clear"}:
+        raise ValueError("operation must be one of: set, append, clear")
+
+    cid = _require_int(payload, "commitment_id")
+    notes: str | None = None
+    if op in {"set", "append"}:
+        raw_notes = payload.get("notes")
+        if raw_notes is None:
+            raise ValueError("notes is required for set/append.")
+        notes = str(raw_notes).strip()
+        if not notes:
+            raise ValueError("notes cannot be empty.")
+
+    request = permissions.require_request(ctx)
+    request_user_id = request.user_id
+    is_global_admin = permissions.is_global_admin(ctx, request_user_id)
+
+    owner_id, channel_id = await _fetch_owner_channel(ctx, cid)
+    if owner_id != request_user_id and not is_global_admin:
+        await permissions.require_staff_for_channel(
+            ctx,
+            channel_id,
+            "modify commitment notes",
+        )
+
+    def _logic(conn: sqlite3.Connection) -> JSONDict:
+        now = _now_ms()
+        row = conn.execute("SELECT notes FROM commitments WHERE id = ?", (cid,)).fetchone()
+        if not row:
+            raise ValueError(f"Commitment id={cid} not found.")
+        existing_raw = row["notes"] if "notes" in row.keys() else None
+        existing = str(existing_raw) if existing_raw is not None else ""
+
+        if op == "set":
+            new_notes = notes
+        elif op == "append":
+            if existing.strip():
+                new_notes = f"{existing}\n{notes}"
+            else:
+                new_notes = notes
+        else:
+            new_notes = None
+
+        conn.execute(
+            "UPDATE commitments SET notes = ?, updated_at = ? WHERE id = ?",
+            (new_notes, now, cid),
+        )
+        conn.commit()
+        row = conn.execute("SELECT * FROM commitments WHERE id = ?", (cid,)).fetchone()
+        if not row:
+            raise ValueError(f"Commitment id={cid} not found.")
+        return {
+            "ok": True,
+            "commitment": _commitment_payload(_row_to_commitment(row)),
         }
 
     return await _with_db(ctx, _logic)
@@ -539,12 +686,44 @@ commitment_manage_tool: ToolDef = ToolDef(
                     "type": "string",
                     "description": "YYYY-MM-DD. Defaults to today.",
                 },
-                "end_date": {"type": "string", "description": "YYYY-MM-DD."},
+                "end_date": {
+                    "type": "string",
+                    "description": "YYYY-MM-DD. Defaults to start_date + 30 days.",
+                },
                 "interval_days": {"type": "integer", "description": "Defaults to 5."},
                 "status": {"type": "string", "enum": ["active", "cancelled", "ended"]},
                 # list filters reuse channel_id/user_id/status
             },
             "required": ["operation"],
+        },
+    },
+)
+
+
+commitment_notes_manage_tool: ToolDef = ToolDef(
+    name="commitment_notes_manage",
+    function=lambda ctx, obj: commitment_notes_manage(ctx, obj),
+    schema={
+        "name": "commitment_notes_manage",
+        "description": "Set/append/clear internal Vox notes for a commitment.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "operation": {
+                    "type": "string",
+                    "enum": ["set", "append", "clear"],
+                    "description": "How to modify notes.",
+                },
+                "commitment_id": {
+                    "type": "integer",
+                    "description": "Commitment id to update.",
+                },
+                "notes": {
+                    "type": "string",
+                    "description": "Required for set/append; ignored for clear.",
+                },
+            },
+            "required": ["operation", "commitment_id"],
         },
     },
 )
@@ -572,9 +751,9 @@ async def commitment_checkin_task(ctx: GlobalContext, _obj: JSON) -> JSONDict:
     """
     # print("commitment_checkin_task running...")
 
-    if ctx.send_discord_message is None:
-        raise RuntimeError("Discord send function not initialized.")
-    send_fn = ctx.send_discord_message
+    request_reply = ctx.request_vox_reply
+    if request_reply is None:
+        raise RuntimeError("Vox reply function not initialized.")
 
     today = dt.date.today()
     today_s = today.isoformat()
@@ -629,19 +808,31 @@ async def commitment_checkin_task(ctx: GlobalContext, _obj: JSON) -> JSONDict:
             for c in commitments:
                 by_user.setdefault(c.user_id, []).append(c)
 
-            lines: list[str] = []
-            lines.append("Progress check-in time.")
-
+            detail_lines: list[str] = []
             for uid in sorted(by_user.keys()):
-                lines.append(f"{_mention(uid)}")
+                detail_lines.append(f"{_mention(uid)}")
                 for c in by_user[uid]:
-                    lines.append(f"- **{c.name}** (ends {c.end_date}): {c.description}")
-            lines.append("")
+                    detail_lines.append(f"- {c.name} (ends {c.end_date}): {c.description}")
+                    if c.notes:
+                        notes = c.notes.strip()
+                        if notes:
+                            detail_lines.append(f"  Notes: {notes}")
+            detail_block = "\n".join(detail_lines).strip()
 
-            lines.append("Reply with: what you did, what’s blocked, and what you’ll do next.")
+            system_lines = [
+                "You are sending a commitment check-in reminder for this channel.",
+                "Mention each user and list their commitments using the data below.",
+                "After listing, ask them to reply with: what they did, what's blocked, and what they'll do next.",
+                "If the user replies, make sure to keep track of their progress in the notes.",
+                "",
+                "Commitments due:",
+                detail_block,
+            ]
+            system_message = "\n".join(system_lines).strip()
+            user_message = "Send the commitment check-in reminder now."
 
             try:
-                await send_fn(channel_id, "\n".join(lines).strip())
+                await request_reply(channel_id, system_message, user_message)
             except Exception:
                 channels_failed += 1
                 _LOGGER.error(
