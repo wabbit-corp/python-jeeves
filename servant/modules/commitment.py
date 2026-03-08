@@ -4,6 +4,7 @@ import asyncio
 import datetime as dt
 import logging
 import sqlite3
+import threading
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -22,7 +23,28 @@ MODULE_PROMPT = (
 
 DEFAULT_INTERVAL_DAYS = 5
 DEFAULT_DB_FILENAME = "servant_commitments.sqlite3"
+DEFAULT_SQLITE_BUSY_TIMEOUT_MS = 5000
 _WARNED_MISSING_COMMITMENT_COLUMNS: set[str] = set()
+_DB_INIT_GUARD = threading.Lock()
+_DB_INIT_LOCKS: dict[Path, threading.Lock] = {}
+_DB_INITIALIZED: set[Path] = set()
+_REQUIRED_COMMITMENT_COLUMNS = frozenset(
+    {
+        "id",
+        "name",
+        "description",
+        "notes",
+        "user_id",
+        "channel_id",
+        "start_date",
+        "end_date",
+        "interval_days",
+        "last_checkin_date",
+        "status",
+        "created_at",
+        "updated_at",
+    }
+)
 T = TypeVar("T")
 
 
@@ -43,11 +65,64 @@ def _db_path(ctx: GlobalContext) -> Path:
 
 
 def _connect(dbfile: Path) -> sqlite3.Connection:
-    conn = sqlite3.connect(str(dbfile))
+    conn = sqlite3.connect(str(dbfile), timeout=DEFAULT_SQLITE_BUSY_TIMEOUT_MS / 1000)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL;")
+    conn.execute(f"PRAGMA busy_timeout={DEFAULT_SQLITE_BUSY_TIMEOUT_MS};")
     conn.execute("PRAGMA foreign_keys=ON;")
     return conn
+
+
+def _get_db_init_lock(dbfile: Path) -> threading.Lock:
+    with _DB_INIT_GUARD:
+        lock = _DB_INIT_LOCKS.get(dbfile)
+        if lock is None:
+            lock = threading.Lock()
+            _DB_INIT_LOCKS[dbfile] = lock
+        return lock
+
+
+def _commitments_has_rows_matching(
+    conn: sqlite3.Connection,
+    where_clause: str,
+    params: tuple[object, ...] = (),
+) -> bool:
+    row = conn.execute(
+        f"SELECT 1 FROM commitments WHERE {where_clause} LIMIT 1",
+        params,
+    ).fetchone()
+    return row is not None
+
+
+def _commitments_need_migration(conn: sqlite3.Connection) -> bool:
+    table_row = conn.execute(
+        """
+        SELECT 1
+        FROM sqlite_master
+        WHERE type = 'table' AND name = 'commitments'
+        LIMIT 1
+        """
+    ).fetchone()
+    if table_row is None:
+        return True
+
+    columns = {str(row["name"]) for row in conn.execute("PRAGMA table_info(commitments)")}
+    if not _REQUIRED_COMMITMENT_COLUMNS.issubset(columns):
+        return True
+
+    return (
+        _commitments_has_rows_matching(conn, "interval_days IS NULL")
+        or _commitments_has_rows_matching(conn, "status IS NULL")
+        or _commitments_has_rows_matching(conn, "created_at IS NULL OR created_at = 0")
+        or _commitments_has_rows_matching(conn, "updated_at IS NULL OR updated_at = 0")
+        or _commitments_has_rows_matching(
+            conn,
+            """
+            (created_at IS NOT NULL AND typeof(created_at) IN ('text', 'real'))
+            OR (updated_at IS NOT NULL AND typeof(updated_at) IN ('text', 'real'))
+            """,
+        )
+    )
 
 
 def _parse_epoch_ms(value: object | None) -> int | None:
@@ -144,7 +219,7 @@ def _ensure_commitments_columns(conn: sqlite3.Connection) -> None:
         _LOGGER.info("Adding missing column commitments.interval_days")
         conn.execute("ALTER TABLE commitments ADD COLUMN interval_days INTEGER NOT NULL DEFAULT 5;")
         columns.add("interval_days")
-    if "interval_days" in columns:
+    if "interval_days" in columns and _commitments_has_rows_matching(conn, "interval_days IS NULL"):
         conn.execute(
             "UPDATE commitments SET interval_days = ? WHERE interval_days IS NULL",
             (DEFAULT_INTERVAL_DAYS,),
@@ -164,14 +239,14 @@ def _ensure_commitments_columns(conn: sqlite3.Connection) -> None:
         _LOGGER.info("Adding missing column commitments.status")
         conn.execute("ALTER TABLE commitments ADD COLUMN status TEXT NOT NULL DEFAULT 'active';")
         columns.add("status")
-    if "status" in columns:
+    if "status" in columns and _commitments_has_rows_matching(conn, "status IS NULL"):
         conn.execute("UPDATE commitments SET status = 'active' WHERE status IS NULL")
 
     if "created_at" not in columns:
         _LOGGER.info("Adding missing column commitments.created_at")
         conn.execute("ALTER TABLE commitments ADD COLUMN created_at INTEGER NOT NULL DEFAULT 0;")
         columns.add("created_at")
-    if "created_at" in columns:
+    if "created_at" in columns and _commitments_has_rows_matching(conn, "created_at IS NULL OR created_at = 0"):
         conn.execute(
             "UPDATE commitments SET created_at = ? WHERE created_at IS NULL OR created_at = 0",
             (_now(),),
@@ -181,7 +256,7 @@ def _ensure_commitments_columns(conn: sqlite3.Connection) -> None:
         _LOGGER.info("Adding missing column commitments.updated_at")
         conn.execute("ALTER TABLE commitments ADD COLUMN updated_at INTEGER NOT NULL DEFAULT 0;")
         columns.add("updated_at")
-    if "updated_at" in columns:
+    if "updated_at" in columns and _commitments_has_rows_matching(conn, "updated_at IS NULL OR updated_at = 0"):
         conn.execute(
             "UPDATE commitments SET updated_at = ? WHERE updated_at IS NULL OR updated_at = 0",
             (_now(),),
@@ -213,6 +288,15 @@ def _init_db(conn: sqlite3.Connection) -> None:
     _ensure_commitments_columns(conn)
     _migrate_timestamp_columns(conn)
     conn.commit()
+
+
+def _ensure_db_initialized(dbfile: Path, conn: sqlite3.Connection) -> None:
+    init_lock = _get_db_init_lock(dbfile)
+    with init_lock:
+        if dbfile in _DB_INITIALIZED and not _commitments_need_migration(conn):
+            return
+        _init_db(conn)
+        _DB_INITIALIZED.add(dbfile)
 
 
 def _today_yyyy_mm_dd() -> str:
@@ -331,7 +415,7 @@ async def _with_db(ctx: GlobalContext, fn: Callable[[sqlite3.Connection], T]) ->
         dbfile.parent.mkdir(parents=True, exist_ok=True)
         conn = _connect(dbfile)
         try:
-            _init_db(conn)
+            _ensure_db_initialized(dbfile, conn)
             return fn(conn)
         finally:
             conn.close()
@@ -776,7 +860,7 @@ async def commitment_checkin_task(ctx: GlobalContext, _obj: JSON) -> JSONDict:
         rows = conn.execute(
             """
             SELECT * FROM commitments
-            WHERE status = 'active' AND ((start_date <= ? AND end_date >= ?) OR 1 = 1)
+            WHERE status = 'active' AND start_date <= ? AND end_date >= ?
             ORDER BY channel_id, user_id, id
             """,
             (today_s, today_s),

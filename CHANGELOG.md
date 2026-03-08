@@ -10,6 +10,7 @@ The entries below are derived from the git history and grouped by release date.
 - Active learning annotation CLI for message datasets with contextual display and JSONL annotations (`make_train_data.py`).
 - Evaluation mode for `make_train_data.py` to report per-label metrics on labeled data.
 - Docker build/run support.
+- Safe allowlisted URL fetch tooling for Vox with bounded JSON/text fetches, crawl4ai page extraction, and handle-based read/grep follow-ups.
 - Event channels module with admin-managed subscriptions that poll ICS calendars and YouTube feeds and post new items into Discord channels.
 - Indexed message search tool for querying the local Discord message index.
 - SQLite-backed LLM throttling policy and request-event log with Discord role exemptions for keeping specific users in high reasoning mode.
@@ -60,6 +61,8 @@ The entries below are derived from the git history and grouped by release date.
 - Label cue matching now treats cues as regexes when needed and restores URL/link matchers in `make_train_data.py`.
 - Fixed label input tokenization so label names are parsed as whole tokens.
 - Excluded video file links from `~linkdrop` weak labeling in `make_train_data.py`.
+- Commitment check-ins now respect each commitment's `start_date`/`end_date` window instead of reminding future commitments early.
+- Commitment DB access now serializes one-time schema init/backfills and waits on transient sqlite locks instead of rerunning write-backed init on every call.
 - Commitment ownership overrides now recognize moderator/staff Discord permissions instead of requiring the `Administrator` bit.
 - Label cue matching now requires explicit `re:` prefixes for regex patterns so literal punctuation cues match reliably.
 - Timestamp formatting now supports ISO-8601 `created_at` values in `make_train_data.py`.

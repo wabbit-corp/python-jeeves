@@ -1,6 +1,8 @@
 import asyncio
 import datetime as dt
 import sqlite3
+import threading
+import time
 from pathlib import Path
 
 import discord
@@ -471,3 +473,231 @@ def test_row_to_commitment_invalid_interval_uses_default() -> None:
     )
     parsed = commitment._row_to_commitment(row)
     assert parsed.interval_days == commitment.DEFAULT_INTERVAL_DAYS
+
+
+def test_commitment_checkin_task_enforces_date_window(
+    tmp_path: Path,
+) -> None:
+    today = dt.date.today()
+    today_s = today.isoformat()
+    future_start = (today + dt.timedelta(days=1)).isoformat()
+    future_end = (today + dt.timedelta(days=5)).isoformat()
+    expired_start = (today - dt.timedelta(days=5)).isoformat()
+    expired_end = (today - dt.timedelta(days=1)).isoformat()
+
+    ctx = _ctx_with_db(tmp_path)
+    sent_messages: list[tuple[str, str, str]] = []
+
+    async def _fake_request_reply(channel_id: str, system_message: str, user_message: str) -> None:
+        sent_messages.append((channel_id, system_message, user_message))
+
+    ctx.request_vox_reply = _fake_request_reply
+
+    payloads: list[JSONDict] = [
+        {
+            "operation": "create",
+            "name": "Current",
+            "description": "Due today",
+            "user_id": "u1",
+            "channel_id": "c1",
+            "start_date": today_s,
+            "end_date": today_s,
+        },
+        {
+            "operation": "create",
+            "name": "Future",
+            "description": "Starts tomorrow",
+            "user_id": "u1",
+            "channel_id": "c1",
+            "start_date": future_start,
+            "end_date": future_end,
+        },
+        {
+            "operation": "create",
+            "name": "Expired",
+            "description": "Already ended",
+            "user_id": "u1",
+            "channel_id": "c1",
+            "start_date": expired_start,
+            "end_date": expired_end,
+        },
+    ]
+    for payload in payloads:
+        asyncio.run(commitment.commitment_manage(ctx, payload))
+
+    result = asyncio.run(commitment.commitment_checkin_task(ctx, {}))
+
+    assert result == {
+        "ok": True,
+        "channels_pinged": 1,
+        "commitments_pinged": 1,
+        "channels_failed": 0,
+    }
+    assert len(sent_messages) == 1
+    channel_id, system_message, user_message = sent_messages[0]
+    assert channel_id == "c1"
+    assert "Current" in system_message
+    assert "Future" not in system_message
+    assert "Expired" not in system_message
+    assert user_message == "Send the commitment check-in reminder now."
+
+    db_path = Path(str(ctx.config["commitments_db_path"]))
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    try:
+        rows = conn.execute(
+            """
+            SELECT name, status, last_checkin_date
+            FROM commitments
+            ORDER BY name
+            """
+        ).fetchall()
+    finally:
+        conn.close()
+
+    by_name = {str(row["name"]): row for row in rows}
+    assert by_name["Current"]["status"] == "active"
+    assert by_name["Current"]["last_checkin_date"] == today_s
+    assert by_name["Future"]["status"] == "active"
+    assert by_name["Future"]["last_checkin_date"] is None
+    assert by_name["Expired"]["status"] == "ended"
+    assert by_name["Expired"]["last_checkin_date"] is None
+
+
+def test_commitment_db_init_runs_once_per_path(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ctx = _ctx_with_db(tmp_path)
+    original_init = commitment._init_db
+    init_calls = 0
+
+    def _counting_init(conn: sqlite3.Connection) -> None:
+        nonlocal init_calls
+        init_calls += 1
+        original_init(conn)
+
+    monkeypatch.setattr(commitment, "_init_db", _counting_init)
+
+    create_result = asyncio.run(
+        commitment.commitment_manage(
+            ctx,
+            {
+                "operation": "create",
+                "name": "Daily Summary",
+                "description": "Write the summary",
+                "user_id": "u1",
+                "channel_id": "c1",
+                "start_date": "2026-01-01",
+                "end_date": "2026-01-31",
+            },
+        )
+    )
+    commitment_payload = require_obj(create_result["commitment"])
+    commitment_id = commitment_payload["id"]
+    assert isinstance(commitment_id, int)
+
+    asyncio.run(
+        commitment.commitment_notes_manage(
+            ctx,
+            {
+                "operation": "append",
+                "commitment_id": commitment_id,
+                "notes": "Completed for 2026-01-29 and 2026-01-30.",
+            },
+        )
+    )
+    asyncio.run(commitment.commitment_manage(ctx, {"operation": "list"}))
+
+    assert init_calls == 1
+
+
+def test_commitment_notes_append_waits_for_locked_db(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original_connect = sqlite3.connect
+
+    def _connect_zero_timeout(
+        database: str,
+        timeout: float = 5.0,
+    ) -> sqlite3.Connection:
+        del timeout
+        return original_connect(database, timeout=0.0)
+
+    monkeypatch.setattr(sqlite3, "connect", _connect_zero_timeout)
+
+    ctx = _ctx_with_db(tmp_path)
+    create_result = asyncio.run(
+        commitment.commitment_manage(
+            ctx,
+            {
+                "operation": "create",
+                "name": "Daily Summary",
+                "description": "Write the summary",
+                "user_id": "u1",
+                "channel_id": "c1",
+                "start_date": "2026-01-01",
+                "end_date": "2026-01-31",
+            },
+        )
+    )
+    commitment_payload = require_obj(create_result["commitment"])
+    commitment_id = commitment_payload["id"]
+    assert isinstance(commitment_id, int)
+
+    db_path = Path(str(ctx.config["commitments_db_path"]))
+    hold_conn = original_connect(str(db_path), timeout=0.0)
+    hold_conn.row_factory = sqlite3.Row
+    hold_conn.execute("PRAGMA journal_mode=WAL;")
+    hold_conn.execute("PRAGMA busy_timeout=0;")
+    hold_conn.execute("BEGIN IMMEDIATE")
+    hold_conn.execute(
+        "UPDATE commitments SET updated_at = updated_at WHERE id = ?",
+        (commitment_id,),
+    )
+
+    append_started = threading.Event()
+    original_now_ms = commitment._now_ms
+
+    def _signal_now_ms() -> int:
+        append_started.set()
+        return original_now_ms()
+
+    monkeypatch.setattr(commitment, "_now_ms", _signal_now_ms)
+
+    result_holder: list[JSONDict] = []
+    error_holder: list[Exception] = []
+
+    def _append_notes() -> None:
+        try:
+            result_holder.append(
+                asyncio.run(
+                    commitment.commitment_notes_manage(
+                        ctx,
+                        {
+                            "operation": "append",
+                            "commitment_id": commitment_id,
+                            "notes": "Completed for 2026-01-29 and 2026-01-30.",
+                        },
+                    )
+                )
+            )
+        except Exception as exc:  # pragma: no cover - asserted below
+            error_holder.append(exc)
+
+    thread = threading.Thread(target=_append_notes)
+    thread.start()
+
+    assert append_started.wait(timeout=1.0)
+    time.sleep(0.1)
+    hold_conn.commit()
+    hold_conn.close()
+
+    thread.join(timeout=2.0)
+    assert not thread.is_alive()
+    assert not error_holder
+    assert len(result_holder) == 1
+
+    updated_commitment = require_obj(result_holder[0]["commitment"])
+    assert updated_commitment["notes"] == "Completed for 2026-01-29 and 2026-01-30."
