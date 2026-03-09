@@ -1,5 +1,6 @@
 Use .venv python venv.
-Use `./check.py [path]` for the full lint/type/test suite (ruff, black --check, mypy, pyright/basedpyright, pytest/unittest, deptry, vulture, semgrep, bandit, pip-audit).
+Use `python ../app-wabbit-dev/dev.py check [path]` for the full lint/type/test suite (ruff, black --check, mypy, pyright/basedpyright, pytest/unittest, deptry, vulture, semgrep, bandit, pip-audit).
+`./check.py` remains a temporary compatibility path while callers migrate.
 Run tests (especially relevant tests) regularly while editing.
 Always keep CHANGELOG.md up to date with meaningful entries.
 

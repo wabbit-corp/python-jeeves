@@ -1,0 +1,24 @@
+site_name: jeeves
+site_description: Documentation for jeeves.
+repo_url: https://github.com/wabbit-corp/python-jeeves
+repo_name: wabbit-corp/python-jeeves
+docs_dir: docs
+theme:
+  name: material
+  features:
+    - navigation.instant
+    - navigation.sections
+    - content.code.copy
+markdown_extensions:
+  - admonition
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.highlight:
+      use_pygments: true
+      pygments_lang_class: true
+  - pymdownx.superfences
+nav:
+  - Home: index.md
+  - Installation: installation.md
+  - Development: development.md
