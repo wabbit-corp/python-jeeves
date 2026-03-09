@@ -10,7 +10,7 @@ The entries below are derived from the git history and grouped by release date.
 - Active learning annotation CLI for message datasets with contextual display and JSONL annotations (`make_train_data.py`).
 - Evaluation mode for `make_train_data.py` to report per-label metrics on labeled data.
 - Docker build/run support.
-- Safe allowlisted URL fetch tooling for Vox with bounded JSON/text fetches, crawl4ai page extraction, and handle-based read/grep follow-ups.
+- Safe URL fetch tooling for Vox with public-host validation, optional host blacklist controls, bounded JSON/text fetches, crawl4ai page extraction, and handle-based read/grep follow-ups.
 - Event channels module with admin-managed subscriptions that poll ICS calendars and YouTube feeds and post new items into Discord channels.
 - Indexed message search tool for querying the local Discord message index.
 - SQLite-backed LLM throttling policy and request-event log with Discord role exemptions for keeping specific users in high reasoning mode.
@@ -33,6 +33,7 @@ The entries below are derived from the git history and grouped by release date.
 - External API connectivity checker script (`servant/scripts/check_external_apis.py`) with IPv4/IPv6 probes via aiohttp.
 ### Changed
 - QA tooling now emits structured output, supports quiet/parallel runs, and improves coverage/error summaries.
+- URL fetch now uses a dedicated browser-like user agent override instead of inheriting the global `web.user-agent`.
 - JSON parsing and type checking tightened across CODI/Servant (import cycles now errors).
 - Coverage fail-under is now 15 to align with current baseline results.
 - Event-channel ICS initialization now publishes a bounded backfill window (last 7 days and next 7 days) instead of silent seeding.
