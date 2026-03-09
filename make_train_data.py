@@ -18,7 +18,7 @@ from collections.abc import Callable, Iterable, Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 from zoneinfo import ZoneInfo
 
 import numpy as np
@@ -122,7 +122,18 @@ def _load_termcolor() -> None:
         return
     colored = getattr(module, "colored", None)
     if callable(colored):
-        _term_colored = colored
+        colored_fn = cast(TermColorFn, colored)
+
+        def _wrapped(
+            text: str,
+            color: str | None = None,
+            on_color: str | None = None,
+            attrs: Sequence[str] | None = None,
+        ) -> str:
+            result = colored_fn(text, color, on_color, attrs)
+            return result if isinstance(result, str) else text
+
+        _term_colored = _wrapped
 
 
 def _c(
@@ -323,6 +334,29 @@ class AutoAnnotator:
     label_names: tuple[str, ...]
 
 
+@dataclass(frozen=True)
+class EvalEntry:
+    index: int
+    labels: frozenset[str]
+    label_names: frozenset[str]
+
+
+@dataclass(frozen=True)
+class EvalMetrics:
+    label: str
+    support: int
+    positives: int
+    tp: int
+    fp: int
+    fn: int
+    tn: int
+    precision: float | None
+    recall: float | None
+    f1: float | None
+    accuracy: float | None
+    status: str
+
+
 class QuitAnnotation(Exception):
     pass
 
@@ -393,6 +427,17 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
         type=int,
         default=AUTO_ANNOTATOR_DEFAULT_MAX_OUTPUT_TOKENS,
         help="Max output tokens for auto-annotation responses.",
+    )
+    parser.add_argument(
+        "--eval",
+        action="store_true",
+        help="Evaluate trained models on labeled data and exit.",
+    )
+    parser.add_argument(
+        "--eval-threshold",
+        type=float,
+        default=0.5,
+        help="Decision threshold for evaluation mode.",
     )
     parser.add_argument("--seed", type=int, default=13)
     parser.add_argument("--show-weak-labels", action="store_true")
@@ -1336,6 +1381,190 @@ def predict_probabilities(
     return probabilities
 
 
+def _safe_divide(numerator: float, denominator: float) -> float:
+    if denominator == 0:
+        return 0.0
+    return numerator / denominator
+
+
+def _compute_binary_metrics(tp: int, fp: int, fn: int, tn: int) -> tuple[float, float, float, float]:
+    precision = _safe_divide(tp, tp + fp)
+    recall = _safe_divide(tp, tp + fn)
+    if precision + recall == 0:
+        f1_score = 0.0
+    else:
+        f1_score = (2 * precision * recall) / (precision + recall)
+    accuracy = _safe_divide(tp + tn, tp + tn + fp + fn)
+    return precision, recall, f1_score, accuracy
+
+
+def _build_eval_entries(
+    annotations: dict[str, AnnotationRecord],
+    message_id_to_index: dict[str, int],
+) -> list[EvalEntry]:
+    entries: list[EvalEntry] = []
+    for record in annotations.values():
+        idx = message_id_to_index.get(record.message_id)
+        if idx is None:
+            continue
+        labels = frozenset(record.labels)
+        label_names = frozenset(record.label_names)
+        if not labels and not label_names:
+            continue
+        entries.append(EvalEntry(index=idx, labels=labels, label_names=label_names))
+    return entries
+
+
+def _evaluate_label_metrics(
+    label_name: str,
+    entries: Sequence[EvalEntry],
+    probabilities: dict[str, FloatArray],
+    *,
+    threshold: float,
+) -> EvalMetrics:
+    series = probabilities.get(label_name)
+    series_len = 0 if series is None else series.shape[0]
+    tp = fp = fn = tn = 0
+    support = 0
+    positives = 0
+    for entry in entries:
+        if label_name in entry.labels:
+            y_true = 1
+        elif label_name in entry.label_names:
+            y_true = 0
+        else:
+            continue
+        if series is not None and entry.index >= series_len:
+            LOGGER.warning("Skipping eval index %s for %s: out of range.", entry.index, label_name)
+            continue
+        support += 1
+        if y_true == 1:
+            positives += 1
+        if series is None:
+            continue
+        score = float(series[entry.index])
+        y_pred = 1 if score >= threshold else 0
+        if y_pred == 1 and y_true == 1:
+            tp += 1
+        elif y_pred == 1 and y_true == 0:
+            fp += 1
+        elif y_pred == 0 and y_true == 1:
+            fn += 1
+        else:
+            tn += 1
+    if series is None:
+        return EvalMetrics(
+            label=label_name,
+            support=support,
+            positives=positives,
+            tp=tp,
+            fp=fp,
+            fn=fn,
+            tn=tn,
+            precision=None,
+            recall=None,
+            f1=None,
+            accuracy=None,
+            status="no_model",
+        )
+    if support == 0:
+        return EvalMetrics(
+            label=label_name,
+            support=0,
+            positives=0,
+            tp=0,
+            fp=0,
+            fn=0,
+            tn=0,
+            precision=None,
+            recall=None,
+            f1=None,
+            accuracy=None,
+            status="no_labels",
+        )
+    precision, recall, f1_score, accuracy = _compute_binary_metrics(tp=tp, fp=fp, fn=fn, tn=tn)
+    return EvalMetrics(
+        label=label_name,
+        support=support,
+        positives=positives,
+        tp=tp,
+        fp=fp,
+        fn=fn,
+        tn=tn,
+        precision=precision,
+        recall=recall,
+        f1=f1_score,
+        accuracy=accuracy,
+        status="ok",
+    )
+
+
+def evaluate_models(
+    label_defs: Sequence[LabelDefinition],
+    annotations: dict[str, AnnotationRecord],
+    message_id_to_index: dict[str, int],
+    probabilities: dict[str, FloatArray],
+    *,
+    threshold: float,
+) -> list[EvalMetrics]:
+    entries = _build_eval_entries(annotations, message_id_to_index)
+    if not entries:
+        return []
+    return [
+        _evaluate_label_metrics(
+            label.name,
+            entries,
+            probabilities,
+            threshold=threshold,
+        )
+        for label in label_defs
+    ]
+
+
+def _format_optional_metric(value: float | None, *, precision: int = 3) -> str:
+    if value is None:
+        return "-"
+    return f"{value:.{precision}f}"
+
+
+def log_evaluation_results(results: Sequence[EvalMetrics], *, threshold: float) -> None:
+    if not results:
+        LOGGER.info("No evaluation results to report.")
+        return
+    label_width = max(5, max(len(result.label) for result in results))
+    LOGGER.info("")
+    LOGGER.info("Evaluation on labeled data (threshold=%.2f)", threshold)
+    LOGGER.info(
+        "%-*s  support  pos  precision  recall  f1  accuracy  status",
+        label_width,
+        "label",
+    )
+    for result in results:
+        LOGGER.info(
+            "%-*s  %7d  %3d  %9s  %6s  %4s  %8s  %s",
+            label_width,
+            result.label,
+            result.support,
+            result.positives,
+            _format_optional_metric(result.precision),
+            _format_optional_metric(result.recall),
+            _format_optional_metric(result.f1),
+            _format_optional_metric(result.accuracy),
+            result.status,
+        )
+    total = len(results)
+    with_data = sum(1 for result in results if result.status == "ok")
+    no_model = sum(1 for result in results if result.status == "no_model")
+    no_labels = sum(1 for result in results if result.status == "no_labels")
+    LOGGER.info(
+        "Evaluation summary: %s labels (%s with data, %s no model, %s no labels).",
+        total,
+        with_data,
+        no_model,
+        no_labels,
+    )
+
+
 def _select_uncertainty(
     unannotated_indices: Sequence[int],
     probabilities: dict[str, FloatArray],
@@ -2240,6 +2469,9 @@ def main(argv: Sequence[str]) -> int:
         if not 0 <= args.random_sample_fraction <= 1:
             LOGGER.error("Random sample fraction must be between 0 and 1.")
             return 2
+        if not 0 <= args.eval_threshold <= 1:
+            LOGGER.error("Eval threshold must be between 0 and 1.")
+            return 2
         if args.retrain_interval < 0:
             LOGGER.error("Retrain interval must be non-negative.")
             return 2
@@ -2379,6 +2611,20 @@ def main(argv: Sequence[str]) -> int:
 
     with log_startup_step("predict probabilities"):
         probabilities = predict_probabilities(models, embeddings)
+    if args.eval:
+        with log_startup_step("evaluate models"):
+            results = evaluate_models(
+                label_defs,
+                annotations,
+                message_id_to_index,
+                probabilities,
+                threshold=args.eval_threshold,
+            )
+            if not results:
+                LOGGER.error("No labeled annotations available for evaluation.")
+                return 1
+            log_evaluation_results(results, threshold=args.eval_threshold)
+        return 0
     with log_startup_step("select candidates"):
         rng = random.Random(args.seed)
         candidates = select_candidates(
