@@ -1,0 +1,58 @@
+name: Docs Quality
+
+on:
+  pull_request:
+  push:
+    branches:
+      - "**"
+    tags:
+      - "v*"
+
+jobs:
+  docs-quality:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e . pytest mypy ruff black "mkdocs>=1.6,<2.0" "mkdocs-material>=9.6,<9.7" codespell
+
+      - name: Run tests
+        run: python -m pytest -q
+
+      - name: Ruff
+        run: python -m ruff check .
+
+      - name: Black
+        run: python -m black --check .
+
+      - name: Mypy
+        run: python -m mypy .
+
+      - name: Spell check docs
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import subprocess
+
+          candidates = [Path("README.md"), Path("docs"), Path("CHANGELOG.md"), Path("CONTRIBUTING.md")]
+          existing = [str(path) for path in candidates if path.exists()]
+          if existing:
+              subprocess.run(
+                  ["codespell", *existing, "--ignore-words=.codespell-ignore-words.txt"],
+                  check=True,
+              )
+          PY
+
+      - name: Build docs
+        run: mkdocs build --strict
