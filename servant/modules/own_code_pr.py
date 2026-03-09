@@ -79,7 +79,7 @@ def _make_branch_name(tool_name: str) -> str:
 
 
 def _submit_pr_sync(ctx: GlobalContext, *, name: str, description: str, code: str) -> JSONDict:
-    token = coerce_str(ctx.secrets.get(SECRET_GITHUB_TOKEN), field="github.token", allow_empty=False)
+    token = coerce_str(ctx.config.get(SECRET_GITHUB_TOKEN), field="github.token", allow_empty=False)
 
     tool_name = _validate_tool_name(name)
     file_path = _tool_file_path(tool_name)
