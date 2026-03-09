@@ -1,30 +1,60 @@
-[project]
+[tool.poetry]
 name = "jeeves"
 version = "0.1.0"
-requires-python = ">=3.10"
-dependencies = [
-    "aiohttp",
-    "discord.py",
-    "Django",
-    "djangorestframework",
-    "emoji",
-    "hypothesis",
-    "imbalanced-learn",
-    "Levenshtein",
-    "numpy",
-    "openai",
-    "PyGithub",
-    "PyYAML",
-    "python-dateutil",
-    "python-dotenv",
-    "pytz",
-    "requests",
-    "scikit-learn",
-    "sentence-transformers",
-    "timezonefinder",
-    "tqdm",
-    "youtube-transcript-api",
-]
+description = ""
+
+license = "AGPL-3.0-or-later"
+readme = "README.md"
+homepage = "https://github.com/wabbit-corp/python-jeeves"
+repository = "https://github.com/wabbit-corp/python-jeeves"
+
+classifiers = ["Development Status :: 3 - Alpha", "Intended Audience :: Developers", "Programming Language :: Python :: 3"]
+packages = [{ include = "codi" }, { include = "servant" }, { include = "typed_json" }]
+
+[tool.poetry.urls]
+"Issue Tracker" = "https://github.com/wabbit-corp/python-jeeves/issues"
+
+[tool.poetry.dependencies]
+python = ">=3.10,<4.0"
+aiohttp = ">=3.13.3,<4.0.0"
+crawl4ai = ">=0.7.8,<1.0.0"
+defusedxml = ">=0.7.1,<1.0.0"
+"discord.py" = ">=2.6.4,<3.0.0"
+discord-ext-voice-recv = ">=0.5.2a179,<0.6.0"
+django = ">=6.0.1,<7.0.0"
+djangorestframework = ">=3.16.1,<4.0.0"
+emoji = ">=1.6.3,<2.0.0"
+imbalanced-learn = ">=0.14.1,<1.0.0"
+levenshtein = ">=0.27.3,<1.0.0"
+numpy = ">=2.4.0,<3.0.0"
+openai = ">=2.14.0,<3.0.0"
+pygithub = ">=2.8.1,<3.0.0"
+pynacl = ">=1.6.2,<2.0.0"
+pyyaml = ">=6.0.3,<7.0.0"
+python-dateutil = ">=2.9.0.post0,<3.0.0"
+python-dotenv = ">=1.2.1,<2.0.0"
+pytz = ">=2025.2,<2026.0.0"
+requests = ">=2.32.5,<3.0.0"
+scikit-learn = ">=1.8.0,<2.0.0"
+sentence-transformers = ">=5.2.0,<6.0.0"
+timezonefinder = ">=8.2.0,<9.0.0"
+tqdm = ">=4.67.1,<5.0.0"
+youtube-transcript-api = ">=1.2.3,<2.0.0"
+
+[tool.poetry.group.dev.dependencies]
+pytest = ">=8.0.0,<9.0.0"
+mypy = ">=1.10.0,<2.0.0"
+ruff = ">=0.8.0,<1.0.0"
+black = ">=24.0.0,<26.0.0"
+coverage = ">=7.0.0,<8.0.0"
+build = ">=1.2.0,<2.0.0"
+twine = ">=5.0.0,<6.0.0"
+hypothesis = ">=6.150.2,<7.0.0"
+
+[tool.poetry.group.docs.dependencies]
+mkdocs = ">=1.6,<2.0"
+mkdocs-material = ">=9.6,<9.7"
+codespell = ">=2.3,<3.0"
 
 [tool.black]
 line-length = 120
@@ -38,65 +68,53 @@ target-version = "py310"
 select = ["F", "E", "W", "I", "B", "UP"]
 ignore = ["E501"]
 
+[tool.mypy]
+python_version = "3.10"
+check_untyped_defs = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+no_implicit_optional = true
+pretty = true
+
 [tool.ruff.lint.per-file-ignores]
-"tests/**/*.py" = ["B"]
 "codi/api/tests/**/*.py" = ["B"]
+"tests/**/*.py" = ["B"]
 
 [tool.pytest.ini_options]
-testpaths = ["tests", "codi/api/tests"]
+testpaths = ["codi/api/tests", "tests"]
 
 [tool.deptry.package_module_name_map]
+"discord-ext-voice-recv" = "discord.ext.voice_recv"
 "discord.py" = "discord"
 "djangorestframework" = "rest_framework"
 "imbalanced-learn" = "imblearn"
-"PyGithub" = "github"
-"PyYAML" = "yaml"
+"levenshtein" = "Levenshtein"
+"pygithub" = "github"
+"pynacl" = "nacl"
 "python-dateutil" = "dateutil"
 "python-dotenv" = "dotenv"
+"pyyaml" = "yaml"
 "scikit-learn" = "sklearn"
 "sentence-transformers" = "sentence_transformers"
 "youtube-transcript-api" = "youtube_transcript_api"
 
 [tool.deptry]
-per_rule_ignores = { "DEP002" = ["hypothesis"] }
-
-[tool.importlinter]
-root_packages = ["codi", "servant", "typed_json"]
-
-# Enforce that siblings under these ancestors don't form cycles
-[[tool.importlinter.contracts]]
-id = "no-sibling-cycles"
-name = "No dependency cycles between sibling packages"
-type = "acyclic_siblings"
-ancestors = ["codi", "servant"]
-depth = 10
-
-# Optional: enforce a strict layering (example)
-[[tool.importlinter.contracts]]
-id = "layering"
-name = "Layered architecture"
-type = "layers"
-layers = [
-  "servant",
-  "codi",
-  "typed_json",
-]
+per_rule_ignores = { "DEP004" = ["pytest", "mypy", "ruff", "black", "coverage", "build", "twine", "codespell", "mkdocs", "mkdocs-material"] }
 
 [tool.coverage.run]
 branch = true
 source = ["codi", "servant", "typed_json"]
-omit = [
-  "tests/*",
-  "codi/api/tests/*",
-  ".venv/*",
-  "**/__pycache__/*",
-]
+omit = ["**/__pycache__/*", ".venv/*", "codi/api/tests/*", "tests/*"]
 
 [tool.coverage.report]
 show_missing = true
 skip_empty = true
-fail_under = 15
+fail_under = 80
 precision = 0
 
 [tool.coverage.xml]
 output = "coverage.xml"
+
+[build-system]
+requires = ["poetry-core>=1.7.0"]
+build-backend = "poetry.core.masonry.api"
