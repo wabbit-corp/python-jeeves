@@ -13,7 +13,7 @@ from typing import TypedDict, TypeVar
 from uuid import uuid4
 
 from codi import disentangle as codi_disentangle
-from servant.defs import GlobalContext, RoutineTask, ToolDef
+from servant.defs import GlobalContext
 from servant.modules import background_indexer
 from typed_json import (
     JSON,
@@ -89,14 +89,14 @@ def _module_state(ctx: GlobalContext) -> ModuleState:
 
 
 def _get_int_config(ctx: GlobalContext, key: str, default: int) -> int:
-    raw = ctx.secrets.get(key)
+    raw = ctx.config.get(key)
     if raw is None:
         return default
     return coerce_int(raw, default)
 
 
 def _get_float_config(ctx: GlobalContext, key: str, default: float) -> float:
-    raw = ctx.secrets.get(key)
+    raw = ctx.config.get(key)
     if raw is None:
         return default
     return coerce_float(raw, default)
@@ -819,7 +819,7 @@ async def analyze_conversations(ctx: GlobalContext, obj: JSON) -> JSONDict:
 
     channel_id = obj.get("channel_id")
     guild_id = obj.get("guild_id")
-    model_dir = coerce_optional_str(obj.get("model_dir")) or coerce_optional_str(ctx.secrets.get("codi_model_dir"))
+    model_dir = coerce_optional_str(obj.get("model_dir")) or coerce_optional_str(ctx.config.get("codi_model_dir"))
     features = coerce_optional_str_list(obj.get("features"))
 
     min_overlap_ratio = _get_float_config(ctx, "codi_min_overlap_ratio", DEFAULT_MIN_OVERLAP_RATIO)
@@ -927,6 +927,7 @@ async def codi_conversation_routine(ctx: GlobalContext, obj: JSON) -> JSONDict:
     channels = result.get("channels")
     count = len(channels) if isinstance(channels, list) else 0
     return {"ok": True, "channels": count}
+
 
 # Disabled for now
 

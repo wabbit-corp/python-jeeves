@@ -625,7 +625,7 @@ def _resolve_db_path(db_path: str | None) -> Path:
 
     ctx = GlobalContext()
     if db_path:
-        ctx.secrets["indexer_db_path"] = str(Path(db_path).expanduser())
+        ctx.config["indexer_db_path"] = str(Path(db_path).expanduser())
     return background_indexer._db_path(ctx)
 
 

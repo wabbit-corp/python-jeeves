@@ -41,9 +41,9 @@ T = TypeVar("T")
 def _db_path(ctx: GlobalContext) -> Path:
     """
     Where to put the sqlite file.
-    Override by setting ctx.secrets['topic_subscriptions_db_path'] to an absolute path.
+    Override by setting ctx.config['topic_subscriptions_db_path'] to an absolute path.
     """
-    raw = ctx.secrets.get("topic_subscriptions_db_path")
+    raw = ctx.config.get("topic_subscriptions_db_path")
     if raw:
         return Path(coerce_str(raw, field="topic_subscriptions_db_path", allow_empty=False)).expanduser().resolve()
     return (Path.cwd() / DEFAULT_DB_FILENAME).resolve()
@@ -117,10 +117,10 @@ def _require_int(obj: JSONDict, key: str) -> int:
 
 
 def _get_cooldown_seconds(ctx: GlobalContext) -> int:
-    raw_seconds = ctx.secrets.get("topic_subscriptions_cooldown_seconds")
+    raw_seconds = ctx.config.get("topic_subscriptions_cooldown_seconds")
     if raw_seconds is not None:
         return coerce_int(raw_seconds, DEFAULT_CHANNEL_COOLDOWN_SECONDS)
-    raw_minutes = ctx.secrets.get("topic_subscriptions_cooldown_minutes")
+    raw_minutes = ctx.config.get("topic_subscriptions_cooldown_minutes")
     if raw_minutes is not None:
         return coerce_int(raw_minutes, DEFAULT_CHANNEL_COOLDOWN_SECONDS // 60) * 60
     return DEFAULT_CHANNEL_COOLDOWN_SECONDS
@@ -133,7 +133,7 @@ def _get_model(ctx: GlobalContext) -> SentenceTransformer:
         raise RuntimeError(
             "sentence_transformers is not installed. " "Install it in the .venv to use topic subscriptions."
         ) from exc
-    model_name = str(ctx.secrets.get("topic_subscriptions_model_name") or DEFAULT_MODEL_NAME)
+    model_name = str(ctx.config.get("topic_subscriptions_model_name") or DEFAULT_MODEL_NAME)
     global _MODEL, _MODEL_NAME
     with _MODEL_LOCK:
         if _MODEL is None or _MODEL_NAME != model_name:

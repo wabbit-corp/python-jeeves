@@ -32,7 +32,7 @@ def _memes_from_data(data: JSON) -> list[JSONDict]:
 
 
 def _require_secret(ctx: GlobalContext, key: str) -> str:
-    return coerce_str(ctx.secrets.get(key), field=key, allow_empty=False)
+    return coerce_str(ctx.config.get(key), field=key, allow_empty=False)
 
 
 def _load_memes_from_file() -> None:

@@ -108,6 +108,29 @@ def test_build_author_payload_includes_global_admin_without_guild_permissions() 
     }
 
 
+def test_flatten_config_values_preserves_top_level_and_dotted_keys() -> None:
+    flattened = servant_app._flatten_config_values(
+        {
+            "web": {
+                "user-agent": "vox",
+                "fetch": {
+                    "blocked_hosts": ["example.com"],
+                },
+            },
+            "admin_user_ids": ["123"],
+        }
+    )
+
+    assert flattened["web"] == {
+        "user-agent": "vox",
+        "fetch": {"blocked_hosts": ["example.com"]},
+    }
+    assert flattened["web.user-agent"] == "vox"
+    assert flattened["web.fetch"] == {"blocked_hosts": ["example.com"]}
+    assert flattened["web.fetch.blocked_hosts"] == ["example.com"]
+    assert flattened["admin_user_ids"] == ["123"]
+
+
 def test_handle_incoming_message_uses_supplied_reasoning_effort(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(servant_app, "TypingIndicator", _NullTypingIndicator)
     monkeypatch.setattr(servant_app, "reply", AsyncMock(return_value=None))

@@ -42,18 +42,18 @@ def _get_value(d: dict[str, JSON], key: str, default: JSON = "") -> JSON:
     return current
 
 
-def _load_secrets(ctx: GlobalContext, config: dict[str, JSON]) -> None:
+def _load_config(ctx: GlobalContext, config: dict[str, JSON]) -> None:
     from servant.defs import ALL_SECRETS, SECRET_OPENAI_KEY
 
     for secret in ALL_SECRETS:
         value = _get_value(config, secret, None)
         if value is not None:
-            ctx.secrets[secret] = value
+            ctx.config[secret] = value
 
-    if SECRET_OPENAI_KEY not in ctx.secrets:
+    if SECRET_OPENAI_KEY not in ctx.config:
         env_key = os.environ.get("OPENAI_API_KEY")
         if env_key:
-            ctx.secrets[SECRET_OPENAI_KEY] = env_key
+            ctx.config[SECRET_OPENAI_KEY] = env_key
 
 
 def _parse_time(value: str | None) -> int | None:
@@ -237,25 +237,25 @@ async def _run(args: argparse.Namespace) -> int:
     ctx = GlobalContext()
 
     config = _load_yaml_config(Path(".private.yml"))
-    _load_secrets(ctx, config)
+    _load_config(ctx, config)
 
     if args.db_path:
-        ctx.secrets["indexer_db_path"] = str(Path(args.db_path).expanduser())
+        ctx.config["indexer_db_path"] = str(Path(args.db_path).expanduser())
     if args.model_dir:
-        ctx.secrets["codi_model_dir"] = str(Path(args.model_dir).expanduser())
+        ctx.config["codi_model_dir"] = str(Path(args.model_dir).expanduser())
     if args.max_named is not None:
-        ctx.secrets["codi_max_named_per_tick"] = int(args.max_named)
+        ctx.config["codi_max_named_per_tick"] = int(args.max_named)
     if args.max_name_messages is not None:
-        ctx.secrets["codi_max_name_messages"] = int(args.max_name_messages)
+        ctx.config["codi_max_name_messages"] = int(args.max_name_messages)
     if args.max_name_preview_chars is not None:
-        ctx.secrets["codi_max_name_preview_chars"] = int(args.max_name_preview_chars)
+        ctx.config["codi_max_name_preview_chars"] = int(args.max_name_preview_chars)
 
-    if SECRET_OPENAI_KEY in ctx.secrets:
+    if SECRET_OPENAI_KEY in ctx.config:
         try:
             import openai
 
             api_key = coerce_str(
-                ctx.secrets.get(SECRET_OPENAI_KEY),
+                ctx.config.get(SECRET_OPENAI_KEY),
                 field="openai.key",
                 allow_empty=False,
             )

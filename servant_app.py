@@ -173,6 +173,27 @@ def _build_tool_message(tool_call_id: str, content: str) -> ChatCompletionToolMe
     return {"role": "tool", "tool_call_id": tool_call_id, "content": content}
 
 
+def _flatten_config_values(
+    value: JSON,
+    *,
+    prefix: str = "",
+) -> JSONDict:
+    if prefix and not isinstance(value, dict):
+        return {prefix: value}
+    if not isinstance(value, dict):
+        return {}
+
+    flattened: JSONDict = {}
+    for raw_key, raw_value in value.items():
+        key = str(raw_key)
+        current_key = f"{prefix}.{key}" if prefix else key
+        normalized_value = obj_to_json(raw_value)
+        flattened[current_key] = normalized_value
+        if isinstance(normalized_value, dict):
+            flattened.update(_flatten_config_values(normalized_value, prefix=current_key))
+    return flattened
+
+
 def _user_payload(
     user_id: str,
     name: str,
@@ -652,8 +673,10 @@ async def main() -> None:
                 return default
         return current
 
+    ctx.config.update(_flatten_config_values(config))
+
     for secret in ALL_SECRETS:
-        value = get_value(config, secret, None)
+        value = ctx.config.get(secret, get_value(config, secret, None))
         print(f"Loaded secret {secret}: {'***' if value is not None else 'NOT FOUND'}")
         if value is not None:
             ctx.config[secret] = value

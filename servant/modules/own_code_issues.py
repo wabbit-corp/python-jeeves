@@ -73,7 +73,7 @@ def _create_issue_sync(token: str, title: str, body: str, label_names: list[str]
 
 
 async def file_bug_report(name: str, description: str = "", *, ctx: GlobalContext) -> JSONDict:
-    token = coerce_str(ctx.secrets.get(SECRET_GITHUB_TOKEN), field="github.token", allow_empty=False)
+    token = coerce_str(ctx.config.get(SECRET_GITHUB_TOKEN), field="github.token", allow_empty=False)
     title = _normalize_title("Bug", name)
     body = _build_body("Bug Report", description)
 
@@ -82,7 +82,7 @@ async def file_bug_report(name: str, description: str = "", *, ctx: GlobalContex
 
 
 async def file_feature_request(name: str, description: str = "", *, ctx: GlobalContext) -> JSONDict:
-    token = coerce_str(ctx.secrets.get(SECRET_GITHUB_TOKEN), field="github.token", allow_empty=False)
+    token = coerce_str(ctx.config.get(SECRET_GITHUB_TOKEN), field="github.token", allow_empty=False)
     title = _normalize_title("Feature", name)
     body = _build_body("Feature Request", description)
 

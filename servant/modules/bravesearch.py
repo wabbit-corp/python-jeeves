@@ -48,7 +48,7 @@ async def search_web(
     query: str,
     num_results: int = _DEFAULT_NUM_RESULTS,
 ) -> JSONDict:
-    api_key_raw = ctx.secrets.get(SECRET_BRAVE_KEY)
+    api_key_raw = ctx.config.get(SECRET_BRAVE_KEY)
     if not api_key_raw:
         return {"error": "Missing Brave Search API key. Set secret brave.key."}
     api_key = coerce_str(api_key_raw, field="brave.key", allow_empty=False)
