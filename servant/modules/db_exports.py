@@ -11,6 +11,7 @@ from pathlib import Path
 
 import discord
 
+from servant import permissions
 from servant.defs import GlobalContext, ToolDef
 from servant.modules import commitment, topic_subscriptions
 from typed_json import JSON, JSONDict, obj_to_json
@@ -167,6 +168,8 @@ async def export_subscriptions_commitments_zip(ctx: GlobalContext, obj: JSON) ->
     if not channel_id:
         raise ValueError("channel_id is required.")
     channel_id = str(channel_id)
+
+    await permissions.require_admin_for_channel(ctx, channel_id, "export databases")
 
     timestamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%d_%H%M%S")
     zip_name = f"servant_db_export_{timestamp}.zip"
