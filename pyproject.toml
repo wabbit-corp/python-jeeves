@@ -23,6 +23,7 @@ dependencies = [
     "sentence-transformers",
     "timezonefinder",
     "tqdm",
+    "yt-dlp",
     "youtube-transcript-api",
 ]
 

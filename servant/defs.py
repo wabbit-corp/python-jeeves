@@ -27,6 +27,9 @@ SECRET_IMGFLIP_USERNAME = "imgflip.username"
 SECRET_IMGFLIP_PASSWORD = "imgflip.password"
 SECRET_BRAVE_KEY = "brave.key"
 SECRET_GITHUB_TOKEN = "github.token"
+SECRET_GOOGLE_DRIVE_CLIENT_ID = "google.drive.client_id"
+SECRET_GOOGLE_DRIVE_CLIENT_SECRET = "google.drive.client_secret"
+SECRET_GOOGLE_DRIVE_REDIRECT_URI = "google.drive.redirect_uri"
 
 ALL_SECRETS = [
     SECRET_OPENAI_KEY,
@@ -36,6 +39,9 @@ ALL_SECRETS = [
     SECRET_IMGFLIP_PASSWORD,
     SECRET_BRAVE_KEY,
     SECRET_GITHUB_TOKEN,
+    SECRET_GOOGLE_DRIVE_CLIENT_ID,
+    SECRET_GOOGLE_DRIVE_CLIENT_SECRET,
+    SECRET_GOOGLE_DRIVE_REDIRECT_URI,
 ]
 
 
@@ -90,6 +96,8 @@ class GlobalContext:
     module_state: dict[str, object] = field(default_factory=dict)
     channel_messages: dict[str, list[JSONDict]] = field(default_factory=lambda: defaultdict(list))
     channel_personality: dict[str, Personality] = field(default_factory=dict)
+    current_channel_id: str | None = None
+    current_user_id: str | None = None
 
     send_discord_message: DiscordSendFn | None = None
 

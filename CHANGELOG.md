@@ -21,6 +21,7 @@ The entries below are derived from the git history and grouped by release date.
 - Annotation timestamps now include `annotated_at` in `make_train_data.py`.
 - GPT-5.2 auto-annotation support with JSON schema output in `make_train_data.py`, showing auto labels before the prompt and accepting with `a`.
 - Message reply references (reply-to ids) now persist in the background indexer.
+- Video download/archive tooling: yt-dlp downloads, Discord attachment upload, and Google Drive OAuth/upload flow with per-user Drive storage in `VoxDownloads`.
 ### Changed
 - QA tooling now emits structured output, supports quiet/parallel runs, and improves coverage/error summaries.
 - JSON parsing and type checking tightened across CODI/Servant (import cycles now errors).
