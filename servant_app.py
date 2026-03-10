@@ -285,212 +285,220 @@ async def handle_incoming_message(
 ) -> None:
     channel_name = str(discord_message.channel)
     channel_id = str(discord_message.channel.id)
+    previous_channel_id = ctx.current_channel_id
+    previous_user_id = ctx.current_user_id
+    ctx.current_channel_id = channel_id
+    ctx.current_user_id = str(discord_message.author.id)
 
     personality = ctx.channel_personality.get(channel_id, EMPTY_PERSONALITY)
     personality_name = personality.name
     personality_name_short = personality_name[0]
     channel_personality = personality.description
 
-    async with TypingIndicator(discord_message, client):
-        system_prompt = (
-            dedent(
-                """
-                # Personality
-                {{personality}}
+    try:
+        async with TypingIndicator(discord_message, client):
+            system_prompt = (
+                dedent("""
+                    # Personality
+                    {{personality}}
 
-                # Communication Medium
-                The user messages will be JSON objects (stringified) with keys: author, content, message_id, and optional reply_to.
-                reply_to, when present, is expanded one level with message_id, author, and content.
-                Messages are passed to and from the users through Discord, so you can use Discord syntax (Markdown + Discord's extensions, e.g. ||<text>|| for hidden text - good for joke punchlines) for formatting.
-                Do not end your messages with a question unless it makes sense to do so in the context. You are chatting with people, not interrogating them.
+                    # Communication Medium
+                    The user messages will be JSON objects (stringified) with keys: author, content, message_id, and optional reply_to.
+                    reply_to, when present, is expanded one level with message_id, author, and content.
+                    Messages are passed to and from the users through Discord, so you can use Discord syntax (Markdown + Discord's extensions, e.g. ||<text>|| for hidden text - good for joke punchlines) for formatting.
+                    Do not end your messages with a question unless it makes sense to do so in the context. You are chatting with people, not interrogating them.
 
-                Don't ever use @here or @everyone mentions.
+                    Don't ever use @here or @everyone mentions.
 
-                Current Channel: {{channel_name}} (id: {{channel_id}})
+                    Current Channel: {{channel_name}} (id: {{channel_id}})
 
-                If a user asks you about your inner workings, direct them to https://github.com/wabbit-corp/python-jeeves and say that PRs are welcome.
-                """
+                    If a user asks you about your inner workings, direct them to https://github.com/wabbit-corp/python-jeeves and say that PRs are welcome.
+                    """)
+                .replace("{{personality}}", channel_personality)
+                .replace("{{channel_name}}", channel_name)
+                .replace("{{channel_id}}", channel_id)
             )
-            .replace("{{personality}}", channel_personality)
-            .replace("{{channel_name}}", channel_name)
-            .replace("{{channel_id}}", channel_id)
-        )
 
-        assert re.search(r"\{\{.*\}\}", system_prompt) is None, "Unresolved template variable in system prompt."
+            assert re.search(r"\{\{.*\}\}", system_prompt) is None, "Unresolved template variable in system prompt."
 
-        jeeves_messages: list[ChatCompletionMessageParam] = [_build_system_message(system_prompt)]
+            jeeves_messages: list[ChatCompletionMessageParam] = [_build_system_message(system_prompt)]
 
-        last_20_messages = ctx.channel_messages[channel_id][-20:]
+            last_20_messages = ctx.channel_messages[channel_id][-20:]
 
-        def get_role(message: JSONDict) -> str:
-            role = message.get("role")
-            return role if isinstance(role, str) else "user"
+            def get_role(message: JSONDict) -> str:
+                role = message.get("role")
+                return role if isinstance(role, str) else "user"
 
-        while last_20_messages and get_role(last_20_messages[0]) == "tool":
-            last_20_messages.pop(0)
+            while last_20_messages and get_role(last_20_messages[0]) == "tool":
+                last_20_messages.pop(0)
 
-        for message in last_20_messages:
-            chat_message = _message_from_json(message)
-            if chat_message is None:
-                continue
-            jeeves_messages.append(chat_message)
-        # jeeves_messages.append({ 'role': 'user', 'content': discord_message.content })
+            for message in last_20_messages:
+                chat_message = _message_from_json(message)
+                if chat_message is None:
+                    continue
+                jeeves_messages.append(chat_message)
+            # jeeves_messages.append({ 'role': 'user', 'content': discord_message.content })
 
-        tools: list[ChatCompletionToolParam] = []
-        for module in ctx.modules.values():
-            for tool_defn in module.tools.values():
-                tool_param = _build_tool_param(tool_defn.schema)
-                if tool_param is not None:
-                    tools.append(tool_param)
+            tools: list[ChatCompletionToolParam] = []
+            for module in ctx.modules.values():
+                for tool_defn in module.tools.values():
+                    tool_param = _build_tool_param(tool_defn.schema)
+                    if tool_param is not None:
+                        tools.append(tool_param)
 
-        while True:
-            try:
-                response = await openai_client.chat.completions.create(
-                    model="gpt-5.2",
-                    messages=jeeves_messages,
-                    tools=tools,
-                    reasoning_effort="high",
-                )
-            except openai.APIError as e:
-                _LOGGER.error("OpenAI API Error: %s", e)
-                return
-
-            choice = response.choices[0]
-            result_message = choice.message
-            tool_calls_param = _tool_calls_from_result(result_message.tool_calls)
-            assistant_message = _build_assistant_message(result_message.content, tool_calls_param)
-            jeeves_messages.append(assistant_message)
-
-            _LOGGER.info("Jeeves response: %s", choice)
-
-            finish_reason = choice.finish_reason
-
-            if finish_reason == "stop":
-                content = result_message.content or ""
-                if content and (
-                    m := re.match(
-                        rf"Message\s+from\s+({personality_name}|{personality_name_short})\s*:",
-                        content,
-                        re.IGNORECASE,
+            while True:
+                try:
+                    response = await openai_client.chat.completions.create(
+                        model="gpt-5.2",
+                        messages=jeeves_messages,
+                        tools=tools,
+                        reasoning_effort="high",
                     )
-                ):
-                    content = content[m.end() :].strip()
-                assistant_message = _build_assistant_message(content, tool_calls_param)
-                jeeves_messages[-1] = assistant_message
-                await reply(discord_message, content)
-                ctx.channel_messages[channel_id].append(_message_to_json(assistant_message))
-                break
+                except openai.APIError as e:
+                    _LOGGER.error("OpenAI API Error: %s", e)
+                    return
 
-            if finish_reason == "tool_calls":
-                if result_message.content:
-                    await reply(discord_message, result_message.content)
+                choice = response.choices[0]
+                result_message = choice.message
+                tool_calls_param = _tool_calls_from_result(result_message.tool_calls)
+                assistant_message = _build_assistant_message(result_message.content, tool_calls_param)
+                jeeves_messages.append(assistant_message)
 
-                tool_calls = result_message.tool_calls or []
-                tool_messages: list[ChatCompletionMessageParam] = [
-                    assistant_message
-                ]  # extend conversation with tool calls
+                _LOGGER.info("Jeeves response: %s", choice)
 
-                for tool_call in tool_calls:
-                    if getattr(tool_call, "type", None) != "function":
-                        _LOGGER.warning(
-                            "Skipping unsupported tool call type: %s",
-                            getattr(tool_call, "type", None),
+                finish_reason = choice.finish_reason
+
+                if finish_reason == "stop":
+                    content = result_message.content or ""
+                    if content and (
+                        m := re.match(
+                            rf"Message\s+from\s+({personality_name}|{personality_name_short})\s*:",
+                            content,
+                            re.IGNORECASE,
                         )
-                        continue
-                    tool_id = getattr(tool_call, "id", None)
-                    tool_function = getattr(tool_call, "function", None)
-                    tool_name = getattr(tool_function, "name", None)
-                    tool_args_raw = getattr(tool_function, "arguments", None)
-                    if not (isinstance(tool_id, str) and isinstance(tool_name, str) and isinstance(tool_args_raw, str)):
-                        _LOGGER.warning(
-                            "Skipping malformed tool call: id=%s name=%s",
-                            tool_id,
-                            tool_name,
-                        )
-                        continue
-                    tool_result: JSONDict
+                    ):
+                        content = content[m.end() :].strip()
+                    assistant_message = _build_assistant_message(content, tool_calls_param)
+                    jeeves_messages[-1] = assistant_message
+                    await reply(discord_message, content)
+                    ctx.channel_messages[channel_id].append(_message_to_json(assistant_message))
+                    break
 
-                    try:
-                        parsed_args = json.loads(tool_args_raw)
-                    except json.JSONDecodeError as e:
-                        _LOGGER.error(
-                            "Invalid JSON arguments for tool %s: %s",
-                            tool_name,
-                            e,
-                        )
-                        tool_result = {
-                            "success": False,
-                            "error": "Tool arguments were not valid JSON.",
-                        }
-                        tool_message = _build_tool_message(
-                            tool_id,
-                            json.dumps(tool_result, ensure_ascii=False),
-                        )
-                        jeeves_messages.append(tool_message)
-                        tool_messages.append(tool_message)
-                        continue
-                    tool_arguments = obj_to_json(parsed_args)
+                if finish_reason == "tool_calls":
+                    if result_message.content:
+                        await reply(discord_message, result_message.content)
 
-                    _LOGGER.info(f"Calling tool {tool_name} with arguments {tool_arguments}")
+                    tool_calls = result_message.tool_calls or []
+                    tool_messages: list[ChatCompletionMessageParam] = [
+                        assistant_message
+                    ]  # extend conversation with tool calls
 
-                    tool_def: ToolDef | None = None
-                    for module in ctx.modules.values():
-                        tool_def = module.tools.get(tool_name)
-                        if tool_def is not None:
-                            break
+                    for tool_call in tool_calls:
+                        if getattr(tool_call, "type", None) != "function":
+                            _LOGGER.warning(
+                                "Skipping unsupported tool call type: %s",
+                                getattr(tool_call, "type", None),
+                            )
+                            continue
+                        tool_id = getattr(tool_call, "id", None)
+                        tool_function = getattr(tool_call, "function", None)
+                        tool_name = getattr(tool_function, "name", None)
+                        tool_args_raw = getattr(tool_function, "arguments", None)
+                        if not (
+                            isinstance(tool_id, str) and isinstance(tool_name, str) and isinstance(tool_args_raw, str)
+                        ):
+                            _LOGGER.warning(
+                                "Skipping malformed tool call: id=%s name=%s",
+                                tool_id,
+                                tool_name,
+                            )
+                            continue
+                        tool_result: JSONDict
 
-                    if tool_def is None:
-                        _LOGGER.error(f"Tool {tool_name} not found in modules.")
-                        tool_result = {
-                            "success": False,
-                            "error": f"Tool {tool_name} not found in modules.",
-                        }
-                    else:
                         try:
-                            tool_output = await tool_def.function(ctx, tool_arguments)
-                            tool_output_json = obj_to_json(tool_output)
-                            if isinstance(tool_output_json, dict):
-                                tool_result = {
-                                    "success": True,
-                                    **tool_output_json,
-                                }
-                            else:
-                                tool_result = {
-                                    "success": True,
-                                    "result": tool_output_json,
-                                }
-                        except Exception as e:
-                            _LOGGER.error(f"Error while executing tool {tool_name}: {e}")
-
-                            # Format errors nicely
-                            # Give traceback
-                            import traceback
-
-                            traceback_str = traceback.format_exc()
-                            error_type = type(e).__name__
-                            error_message = str(e)
+                            parsed_args = json.loads(tool_args_raw)
+                        except json.JSONDecodeError as e:
+                            _LOGGER.error(
+                                "Invalid JSON arguments for tool %s: %s",
+                                tool_name,
+                                e,
+                            )
                             tool_result = {
                                 "success": False,
-                                "type": error_type,
-                                "error": error_message,
-                                "traceback": traceback_str,
+                                "error": "Tool arguments were not valid JSON.",
                             }
+                            tool_message = _build_tool_message(
+                                tool_id,
+                                json.dumps(tool_result, ensure_ascii=False),
+                            )
+                            jeeves_messages.append(tool_message)
+                            tool_messages.append(tool_message)
+                            continue
+                        tool_arguments = obj_to_json(parsed_args)
 
-                    _LOGGER.info(f"Tool {tool_name} returned {tool_result}")
+                        _LOGGER.info(f"Calling tool {tool_name} with arguments {tool_arguments}")
 
-                    msg = _build_tool_message(
-                        tool_id,
-                        json.dumps(obj_to_json(tool_result), ensure_ascii=False),
-                    )
+                        tool_def: ToolDef | None = None
+                        for module in ctx.modules.values():
+                            tool_def = module.tools.get(tool_name)
+                            if tool_def is not None:
+                                break
 
-                    jeeves_messages.append(msg)
-                    tool_messages.append(msg)
+                        if tool_def is None:
+                            _LOGGER.error(f"Tool {tool_name} not found in modules.")
+                            tool_result = {
+                                "success": False,
+                                "error": f"Tool {tool_name} not found in modules.",
+                            }
+                        else:
+                            try:
+                                tool_output = await tool_def.function(ctx, tool_arguments)
+                                tool_output_json = obj_to_json(tool_output)
+                                if isinstance(tool_output_json, dict):
+                                    tool_result = {
+                                        "success": True,
+                                        **tool_output_json,
+                                    }
+                                else:
+                                    tool_result = {
+                                        "success": True,
+                                        "result": tool_output_json,
+                                    }
+                            except Exception as e:
+                                _LOGGER.error(f"Error while executing tool {tool_name}: {e}")
 
-                ctx.channel_messages[channel_id].extend([_message_to_json(msg) for msg in tool_messages])
-                continue
+                                # Format errors nicely
+                                # Give traceback
+                                import traceback
 
-            _LOGGER.warning("Unhandled finish reason: %s", finish_reason)
-            break
+                                traceback_str = traceback.format_exc()
+                                error_type = type(e).__name__
+                                error_message = str(e)
+                                tool_result = {
+                                    "success": False,
+                                    "type": error_type,
+                                    "error": error_message,
+                                    "traceback": traceback_str,
+                                }
+
+                        _LOGGER.info(f"Tool {tool_name} returned {tool_result}")
+
+                        msg = _build_tool_message(
+                            tool_id,
+                            json.dumps(obj_to_json(tool_result), ensure_ascii=False),
+                        )
+
+                        jeeves_messages.append(msg)
+                        tool_messages.append(msg)
+
+                    ctx.channel_messages[channel_id].extend([_message_to_json(msg) for msg in tool_messages])
+                    continue
+
+                _LOGGER.warning("Unhandled finish reason: %s", finish_reason)
+                break
+    finally:
+        ctx.current_channel_id = previous_channel_id
+        ctx.current_user_id = previous_user_id
 
 
 async def main() -> None:
@@ -830,7 +838,7 @@ async def main() -> None:
                     exc_info=True,
                 )
 
-            if discord_message.guild is not None and str(discord_message.guild.id) == '699975135905710181':
+            if discord_message.guild is not None and str(discord_message.guild.id) == "699975135905710181":
                 return  # Ignore messages from this server
 
             if discord_message.author == self.user:
