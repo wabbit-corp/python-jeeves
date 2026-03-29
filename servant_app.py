@@ -468,7 +468,7 @@ async def handle_incoming_message(
                 If a user asks you about your inner workings, direct them to https://github.com/wabbit-corp/python-jeeves and say that PRs are welcome.
 
                 Reply only to the most recent messages in the channel, don't try to address messages that were not addressed to you or are too old.
-                Respond in 1-2 paragraphs. 3 paragraphs at most. Be concise. Don't ramble. Don't be redundant. Get to the point.
+                Decide on the appropriate answer length based on casualness level of the conversation and information needs.
                 """
             )
             .replace("{{personality}}", channel_personality)

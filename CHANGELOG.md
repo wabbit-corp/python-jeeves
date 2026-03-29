@@ -32,6 +32,7 @@ The entries below are derived from the git history and grouped by release date.
 - Voice capture dependency for Discord voice receive plus PyNaCl runtime support.
 - External API connectivity checker script (`servant/scripts/check_external_apis.py`) with IPv4/IPv6 probes via aiohttp.
 ### Changed
+- Discord reply instructions now let Jeeves vary answer length based on the conversation's casualness and information needs.
 - QA tooling now emits structured output, supports quiet/parallel runs, and improves coverage/error summaries.
 - URL fetch now uses a dedicated browser-like user agent override instead of inheriting the global `web.user-agent`.
 - JSON parsing and type checking tightened across CODI/Servant (import cycles now errors).
