@@ -10,15 +10,12 @@ import time
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, TypeVar
+from typing import Protocol, TypeVar
+
+import discord
 
 from servant.defs import GlobalContext, ToolDef
 from typed_json import JSON, JSONDict, coerce_float, coerce_int, coerce_str
-
-if TYPE_CHECKING:
-    import discord
-    from sentence_transformers import SentenceTransformer
-
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -31,9 +28,19 @@ DEFAULT_DB_FILENAME = "servant_topic_subscriptions.sqlite3"
 DEFAULT_SIMILARITY_THRESHOLD = 0.6
 DEFAULT_CHANNEL_COOLDOWN_SECONDS = 15 * 60
 DEFAULT_MODEL_NAME = "all-MiniLM-L6-v2"
+_MODEL_NAME_ALIASES = {
+    "all-MiniLM-L6-v2": "sentence-transformers/all-MiniLM-L6-v2",
+}
+
+
+class _EmbeddingModel(Protocol):
+    def embed(
+        self, documents: Iterable[str], *, batch_size: int = 256, parallel: int | None = None
+    ) -> Iterable[object]: ...
+
 
 _MODEL_LOCK = threading.Lock()
-_MODEL: SentenceTransformer | None = None
+_MODEL: _EmbeddingModel | None = None
 _MODEL_NAME: str | None = None
 T = TypeVar("T")
 
@@ -126,22 +133,29 @@ def _get_cooldown_seconds(ctx: GlobalContext) -> int:
     return DEFAULT_CHANNEL_COOLDOWN_SECONDS
 
 
-def _get_model(ctx: GlobalContext) -> SentenceTransformer:
+def _get_model_name(ctx: GlobalContext) -> str:
+    raw = ctx.config.get("topic_subscriptions_model_name")
+    if raw is None:
+        configured_name = DEFAULT_MODEL_NAME
+    else:
+        configured_name = coerce_str(raw, field="topic_subscriptions_model_name", allow_empty=False)
+    return _MODEL_NAME_ALIASES.get(configured_name, configured_name)
+
+
+def _get_model(ctx: GlobalContext) -> _EmbeddingModel:
     try:
-        from sentence_transformers import SentenceTransformer
+        from fastembed import TextEmbedding
     except Exception as exc:  # pragma: no cover - handled at runtime
-        raise RuntimeError(
-            "sentence_transformers is not installed. " "Install it in the .venv to use topic subscriptions."
-        ) from exc
-    model_name = str(ctx.config.get("topic_subscriptions_model_name") or DEFAULT_MODEL_NAME)
+        raise RuntimeError("fastembed is not installed. Install it in the .venv to use topic subscriptions.") from exc
+    model_name = _get_model_name(ctx)
     global _MODEL, _MODEL_NAME
     with _MODEL_LOCK:
         if _MODEL is None or _MODEL_NAME != model_name:
-            _LOGGER.info("Loading sentence_transformers model: %s", model_name)
-            _MODEL = SentenceTransformer(model_name)
+            _LOGGER.info("Loading fastembed model: %s", model_name)
+            _MODEL = TextEmbedding(model_name=model_name)
             _MODEL_NAME = model_name
     if _MODEL is None:
-        raise RuntimeError("Failed to initialize sentence_transformers model.")
+        raise RuntimeError("Failed to initialize fastembed model.")
     return _MODEL
 
 
@@ -152,19 +166,22 @@ def _normalize(vec: list[float]) -> list[float]:
     return [v / norm for v in vec]
 
 
+def _coerce_embedding(raw: object) -> list[float]:
+    tolist = getattr(raw, "tolist", None)
+    if callable(tolist):
+        raw = tolist()
+    if not isinstance(raw, Iterable) or isinstance(raw, str | bytes | dict):
+        raise ValueError("Embedding must be iterable.")
+    return [float(value) for value in raw]
+
+
 def _embed_text(ctx: GlobalContext, text: str) -> list[float]:
     model = _get_model(ctx)
     with _MODEL_LOCK:
-        embedding = model.encode(text, show_progress_bar=False)
-    if hasattr(embedding, "tolist"):
-        raw = embedding.tolist()
-        if not isinstance(raw, list):
-            raise ValueError("Embedding must be a list of numbers.")
-        vec = [float(v) for v in raw]
-    elif isinstance(embedding, Iterable):
-        vec = [float(v) for v in embedding]
-    else:
-        raise ValueError("Embedding must be iterable.")
+        embeddings = list(model.embed([text], batch_size=1, parallel=None))
+    if not embeddings:
+        raise RuntimeError("Embedding backend returned no vectors.")
+    vec = _coerce_embedding(embeddings[0])
     return _normalize(vec)
 
 

@@ -6,6 +6,7 @@ The entries below are derived from the git history and grouped by release date.
 
 ## [Unreleased]
 ### Added
+- Deployment review and shared-host migration plan for Jeeves, including SQLite preservation strategy for `discord-bots` (`deploy-plan.md`).
 - CODI tooling and docs: auto-annotation, training export, and workflow notes (`conversations.md`).
 - Active learning annotation CLI for message datasets with contextual display and JSONL annotations (`make_train_data.py`).
 - Evaluation mode for `make_train_data.py` to report per-label metrics on labeled data.
@@ -32,6 +33,7 @@ The entries below are derived from the git history and grouped by release date.
 - Voice capture dependency for Discord voice receive plus PyNaCl runtime support.
 - External API connectivity checker script (`servant/scripts/check_external_apis.py`) with IPv4/IPv6 probes via aiohttp.
 ### Changed
+- Topic subscriptions now use `fastembed` with the ONNX `sentence-transformers/all-MiniLM-L6-v2` model path, while preserving the legacy `all-MiniLM-L6-v2` config alias.
 - Discord reply instructions now let Jeeves vary answer length based on the conversation's casualness and information needs.
 - QA tooling now emits structured output, supports quiet/parallel runs, and improves coverage/error summaries.
 - URL fetch now uses a dedicated browser-like user agent override instead of inheriting the global `web.user-agent`.

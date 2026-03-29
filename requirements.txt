@@ -4,6 +4,7 @@ defusedxml>=0.7.1,<1.0.0
 discord.py>=2.6.4,<3.0.0
 discord-ext-voice-recv>=0.5.2a179,<0.6.0
 emoji>=1.6.3,<2.0.0
+fastembed>=0.8.0,<1.0.0
 levenshtein>=0.27.3,<1.0.0
 numpy>=2.4.0,<3.0.0
 openai>=2.14.0,<3.0.0
