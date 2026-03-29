@@ -41,7 +41,7 @@ Recommended first deployment model:
 Operational consequence:
 
 - the deployed working directory matters
-- `.private.yml` must exist at runtime in that working directory, or be symlinked there
+- the service can now point at an external config file via `JEEVES_CONFIG_PATH`
 - if we want the DBs somewhere safer than the repo checkout, we must set absolute DB paths in `.private.yml`
 
 ### 2. Persistent SQLite state that must be preserved
@@ -289,13 +289,13 @@ Before touching the host, add deployment artifacts to this repo:
 1. `deploy/discord-bot-jeeves.service`
 2. deployment README or server notes
 3. `.private.yml` deployment template with explicit absolute DB paths
-4. optional helper for safe SQLite snapshotting
+4. helper for safe SQLite snapshotting / state staging
+5. lean runtime install input that avoids unnecessary host-only ML weight
 
 Nice-to-have code improvements before deployment:
 
-1. support a config path override like `JEEVES_CONFIG_PATH` so runtime is not coupled to `.private.yml` in the working directory
-2. make persistent-path configuration more centralized and documented
-3. add deployment docs for `systemd`
+1. make persistent-path configuration more centralized and documented
+2. add deployment docs for `systemd`
 
 These are not strictly required for the first move because the symlink approach works.
 

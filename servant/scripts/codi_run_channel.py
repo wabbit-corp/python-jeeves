@@ -19,18 +19,6 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 
-def _load_yaml_config(path: Path) -> dict[str, JSON]:
-    if not path.exists():
-        return {}
-    try:
-        import yaml
-    except Exception:
-        return {}
-    with path.open("r", encoding="utf-8") as handle:
-        loaded = yaml.safe_load(handle) or {}
-    return loaded if isinstance(loaded, dict) else {}
-
-
 def _get_value(d: dict[str, JSON], key: str, default: JSON = "") -> JSON:
     parts = key.split(".")
     current: JSON = d
@@ -230,13 +218,14 @@ def _query_output(
 
 
 async def _run(args: argparse.Namespace) -> int:
+    from servant.config_loader import load_yaml_config, resolve_config_path
     from servant.defs import SECRET_OPENAI_KEY, GlobalContext
     from servant.modules import codi_conversation_indexer
     from typed_json import coerce_str
 
     ctx = GlobalContext()
 
-    config = _load_yaml_config(Path(".private.yml"))
+    config = load_yaml_config(resolve_config_path())
     _load_config(ctx, config)
 
     if args.db_path:

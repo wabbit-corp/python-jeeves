@@ -5,7 +5,6 @@ import re
 import time
 from collections.abc import Iterable
 from concurrent.futures import Future
-from pathlib import Path
 from textwrap import dedent
 from typing import TypeGuard, Union
 
@@ -25,6 +24,7 @@ from openai.types.chat import (
 from openai.types.shared_params.function_definition import FunctionDefinition
 
 from servant import llm_throttling, permissions, voice_transcriber
+from servant.config_loader import load_yaml_config, resolve_config_path
 from servant.defs import (
     ALL_SECRETS,
     SECRET_DISCORD_TOKEN,
@@ -666,16 +666,8 @@ async def main() -> None:
     # Config loading
     ###########################################################################
 
-    import yaml
-
-    config_path = Path(".private.yml")
-    config: JSONDict = {}
-    if config_path.exists():
-        with config_path.open("r", encoding="utf-8") as handle:
-            loaded = yaml.safe_load(handle) or {}
-        loaded_json = obj_to_json(loaded)
-        if isinstance(loaded_json, dict):
-            config = loaded_json
+    config_path = resolve_config_path()
+    config = load_yaml_config(config_path)
 
     def get_value(d: JSONDict, key: str, default: JSON | None = "") -> JSON | None:
         parts = key.split(".")

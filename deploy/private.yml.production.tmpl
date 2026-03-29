@@ -1,0 +1,29 @@
+# Production config template for the shared discord-bots host.
+# The systemd unit sets JEEVES_CONFIG_PATH=/etc/python-jeeves/private.yml.
+
+fetch_user_agent: "Mozilla/5.0 (compatible; Jeeves/1.0; +https://github.com/wabbit-corp/python-jeeves)"
+url_fetch_blocked_hosts:
+  - "example.com"
+web:
+  user-agent: "Mozilla/5.0 (compatible; Jeeves/1.0; +https://github.com/wabbit-corp/python-jeeves)"
+openai:
+  key: "<your-openai-key>"
+discord:
+  token: "<your-discord-token>"
+imgflip:
+  username: "<your-imgflip-username>"
+  password: "<your-imgflip-password>"
+brave:
+  key: "<your-brave-key>"
+github:
+  token: "<your-github-token>"
+
+admin_user_ids:
+  - "<your-discord-admin-user-id>"
+
+indexer_db_path: "/var/lib/python-jeeves/sqlite/servant_index.sqlite3"
+commitments_db_path: "/var/lib/python-jeeves/sqlite/servant_commitments.sqlite3"
+event_channels_db_path: "/var/lib/python-jeeves/sqlite/servant_event_channels.sqlite3"
+topic_subscriptions_db_path: "/var/lib/python-jeeves/sqlite/servant_topic_subscriptions.sqlite3"
+codi_model_dir: "/var/lib/python-jeeves/codi-models"
+topic_subscriptions_model_name: "sentence-transformers/all-MiniLM-L6-v2"
