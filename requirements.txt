@@ -6,6 +6,7 @@ discord-ext-voice-recv>=0.5.2a179,<0.6.0
 django>=6.0.1,<7.0.0
 djangorestframework>=3.16.1,<4.0.0
 emoji>=1.6.3,<2.0.0
+fastembed>=0.8.0,<1.0.0
 imbalanced-learn>=0.14.1,<1.0.0
 levenshtein>=0.27.3,<1.0.0
 numpy>=2.4.0,<3.0.0
