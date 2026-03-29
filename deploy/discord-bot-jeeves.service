@@ -1,0 +1,28 @@
+[Unit]
+Description=Jeeves Discord bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=python-jeeves
+Group=python-jeeves
+WorkingDirectory=/opt/python-jeeves/current
+Environment=JEEVES_CONFIG_PATH=/etc/python-jeeves/private.yml
+Environment=HF_HOME=/var/cache/python-jeeves/huggingface
+Environment=FASTEMBED_CACHE_PATH=/var/cache/python-jeeves/fastembed
+Environment=XDG_CACHE_HOME=/var/cache/python-jeeves
+Environment=CODI_MODEL_DIR=/var/lib/python-jeeves/codi-models
+ExecStart=/opt/python-jeeves/current/.venv/bin/python /opt/python-jeeves/current/servant_app.py
+Restart=always
+RestartSec=5
+TimeoutStopSec=30
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=full
+ProtectHome=yes
+ReadWritePaths=/var/lib/python-jeeves /var/cache/python-jeeves
+UMask=027
+
+[Install]
+WantedBy=multi-user.target
