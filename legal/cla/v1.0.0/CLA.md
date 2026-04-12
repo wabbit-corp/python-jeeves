@@ -8,7 +8,7 @@ Thank you for your interest in contributing to the Wabbit Consulting Corporation
 
 - **"You"** means the individual or legal entity making the contribution.
 - **"Contribution"** means any original work of authorship, including any modifications or additions to an existing work, that is intentionally submitted by You to Wabbit Corporation for inclusion in the Project, such as source code, documentation, or other materials. For example, submitting a pull request or patch via email constitutes a Contribution.
-- **"Project"** means the software project primarily licensed under the GNU Affero General Public License v3.0 or later (AGPL-3.0-or-later) and managed by Wabbit Corporation, with the understanding that Wabbit Corporation may also offer commercial licensing options.
+- **"Project"** means the software project primarily licensed under GNU Affero General Public License v3.0 or later (AGPL-3.0-or-later) and managed by Wabbit Corporation, with the understanding that Wabbit Corporation may also offer commercial licensing options.
 
 ### 2. Grant of Licenses
 
@@ -59,7 +59,7 @@ You agree that the opportunity to participate in the development of the Project 
 You agree that you are participating as an independent contributor and not as an employee, agent, or representative of Wabbit Corporation. Nothing in this Agreement shall be construed to create any partnership, joint venture, or employer-employee relationship between you and Wabbit Corporation.
 
 ### 9. Data Protection and Privacy
-Wabbit Corporation will collect and process personal data necessary for the administration of contributions in accordance with its Privacy Policy contained in [CONTRIBUTOR_PRIVACY.md](CONTRIBUTOR_PRIVACY.md). By entering into this Agreement, you consent to such processing of your personal data.
+Wabbit Corporation will collect and process personal data necessary for the administration of contributions in accordance with its Privacy Policy contained in [CONTRIBUTOR_PRIVACY.md](../../contributor-privacy/v1.0.0/CONTRIBUTOR_PRIVACY.md). By entering into this Agreement, you consent to such processing of your personal data.
 
 ### 10. Indemnification and Liability Limitations
 To the extent permitted by applicable law, you agree to indemnify and hold harmless Wabbit Corporation, its officers, directors, and agents, against any claim arising from your breach of the representations and warranties in this Agreement. This indemnification obligation shall be limited to actual damages incurred by Wabbit Corporation, and in no event shall your total liability exceed the actual damages incurred by Wabbit Corporation as a direct result of your breach.
