@@ -7,14 +7,19 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
+  pages: write
+  id-token: write
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
-  deploy:
+  build:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
@@ -28,10 +33,24 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e . "mkdocs>=1.6,<2.0" "mkdocs-material>=9.6,<9.7"
 
-      - name: Configure git author
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
 
-      - name: Deploy docs to gh-pages
-        run: mkdocs gh-deploy --force --clean --remote-name origin --remote-branch gh-pages
+      - name: Build docs
+        run: mkdocs build --strict --site-dir site
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

@@ -1,4 +1,4 @@
-# Code of Excellence
+# Code of Excellence for Wabbit Corporation
 
 ## Purpose
 
