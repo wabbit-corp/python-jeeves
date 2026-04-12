@@ -482,11 +482,16 @@ async def commitment_manage(ctx: GlobalContext, obj: JSON) -> JSONDict:
     if op == "list":
         channel_id_raw = payload.get("channel_id")
         list_channel_id: str | None = str(channel_id_raw) if channel_id_raw is not None else None
+        user_id_raw = payload.get("user_id")
+        list_user_id: str | None = str(user_id_raw) if user_id_raw is not None else None
+        if list_channel_id is None and list_user_id is not None and list_user_id != request_user_id and not is_global_admin:
+            request_channel_id = request.channel_id
+            if request_channel_id is not None:
+                list_channel_id = request_channel_id
+                payload["channel_id"] = request_channel_id
         channel_admin = False
         if list_channel_id is not None and not is_global_admin:
             channel_admin = await permissions.is_staff_for_channel(ctx, list_channel_id)
-        user_id_raw = payload.get("user_id")
-        list_user_id: str | None = str(user_id_raw) if user_id_raw is not None else None
         if list_user_id is not None and list_user_id != request_user_id and not (channel_admin or is_global_admin):
             raise PermissionError("Staff privileges required to list another user's commitments.")
         if list_user_id is None and not (channel_admin or is_global_admin):

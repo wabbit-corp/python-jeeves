@@ -127,6 +127,9 @@ async def resolve_guild_id_for_channel(ctx: GlobalContext, channel_id: str) -> s
     channel_id_norm = _normalize_id(channel_id)
     if channel_id_norm is None:
         return None
+    request = ctx.request
+    if request is not None and request.guild_id is not None and request.channel_id == channel_id_norm:
+        return request.guild_id
     from_indexer = _lookup_guild_id_from_indexer(ctx, channel_id_norm)
     if from_indexer is not None:
         return from_indexer

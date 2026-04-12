@@ -3394,7 +3394,11 @@ async def _index_next_channel_messages_from_picker(
     if channel is None:
         try:
             channel = await client.fetch_channel(int(channel_id))
-        except (discord.Forbidden, discord.NotFound) as e:
+        except discord.NotFound as e:
+            _LOGGER.warning("Disabling missing channel %s: %s", channel_id, e)
+            await _disable_channel("not_found", e)
+            return {"messages_indexed": 0}
+        except discord.Forbidden as e:
             _LOGGER.error("Failed to fetch channel %s: %s", channel_id, e, exc_info=True)
             await _disable_channel("forbidden", e)
             return {"messages_indexed": 0}
@@ -3435,12 +3439,7 @@ async def _index_next_channel_messages_from_picker(
         await _record_fetch_backoff(e)
         return {"messages_indexed": 0}
     except discord.NotFound as e:
-        _LOGGER.error(
-            "Channel not found while fetching messages for %s: %s",
-            channel_id,
-            e,
-            exc_info=True,
-        )
+        _LOGGER.warning("Channel not found while fetching messages for %s: %s", channel_id, e)
         await _disable_channel("not_found", e)
         return {"messages_indexed": 0}
     except Exception as e:
