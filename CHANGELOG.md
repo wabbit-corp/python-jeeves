@@ -36,6 +36,7 @@ The entries below are derived from the git history and grouped by release date.
 ### Changed
 - Runtime config loading now supports `JEEVES_CONFIG_PATH`, so deploys can point at `/etc/python-jeeves/private.yml` without relying on a working-directory config file.
 - Topic subscriptions now use `fastembed` with the ONNX `sentence-transformers/all-MiniLM-L6-v2` model path, while preserving the legacy `all-MiniLM-L6-v2` config alias.
+- Runtime dependency manifests now constrain `PyNaCl` to `<1.6` and pin the shared-host Discord voice stack in `requirements.runtime.txt`, matching what `discord.py[voice]` actually accepts for clean installs.
 - Discord reply instructions now let Jeeves vary answer length based on the conversation's casualness and information needs.
 - QA tooling now emits structured output, supports quiet/parallel runs, and improves coverage/error summaries.
 - URL fetch now uses a dedicated browser-like user agent override instead of inheriting the global `web.user-agent`.
@@ -63,6 +64,9 @@ The entries below are derived from the git history and grouped by release date.
 - Startup timing logs now cover each initialization step before the first annotation in `make_train_data.py`.
 - Weak label computation now skips entirely when `--weak-label-weight=0` to reduce startup time.
 ### Fixed
+- Cross-user commitment lookups now default to the active request channel and reuse the current request guild context, so guild staff/owners can resolve and cancel another user's commitment without redundant channel metadata.
+- Routine tasks now wait for Discord readiness, and dispatch helpers bind the active loop before startup work begins, avoiding first-boot reminder/event task failures during deployment.
+- Background indexer now treats preserved-but-missing Discord channels as expected `not_found` cleanup instead of noisy error tracebacks while it disables stale rows from the carried-over SQLite state.
 - Guarded unigram probability computation against empty or fully-trimmed vocabularies to avoid runtime crashes.
 - Label cue matching now treats cues as regexes when needed and restores URL/link matchers in `make_train_data.py`.
 - Fixed label input tokenization so label names are parsed as whole tokens.
