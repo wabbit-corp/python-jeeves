@@ -10,6 +10,7 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
+from servant import permissions
 from servant.defs import GlobalContext, RequestContext
 from servant.modules import commitment
 from typed_json import JSON, JSONDict, require_obj
@@ -431,6 +432,57 @@ def test_commitment_manage_staff_can_list_other_user_commitments(tmp_path: Path)
     commitments_value = result["commitments"]
     assert isinstance(commitments_value, list)
     assert len(commitments_value) == 1
+
+
+def test_commitment_manage_staff_can_list_other_user_commitments_without_channel_id(tmp_path: Path) -> None:
+    admin_ctx = _ctx_with_db(
+        tmp_path,
+        user_id="999",
+        channel_id="100",
+        guild_id="1",
+        admin_user_ids=["999"],
+    )
+    create_payload: JSONDict = {
+        "operation": "create",
+        "name": "Lift",
+        "description": "Three times a week",
+        "user_id": "200",
+        "channel_id": "100",
+        "start_date": "2024-01-01",
+        "end_date": "2024-01-31",
+    }
+    asyncio.run(commitment.commitment_manage(admin_ctx, create_payload))
+
+    ctx = _ctx_with_db(tmp_path, user_id="500", channel_id="100", guild_id="1")
+    _attach_staff_client(
+        ctx,
+        guild_id="1",
+        channel_id="100",
+        user_id="500",
+        permissions=discord.Permissions(manage_guild=True),
+    )
+
+    result = asyncio.run(
+        commitment.commitment_manage(
+            ctx,
+            {"operation": "list", "user_id": "200"},
+        )
+    )
+
+    assert result["ok"] is True
+    commitments_value = result["commitments"]
+    assert isinstance(commitments_value, list)
+    assert len(commitments_value) == 1
+    first = require_obj(commitments_value[0])
+    assert first["channel_id"] == "100"
+
+
+def test_resolve_guild_id_for_channel_uses_request_context_match(tmp_path: Path) -> None:
+    ctx = _ctx_with_db(tmp_path, user_id="500", channel_id="100", guild_id="1")
+
+    result = asyncio.run(permissions.resolve_guild_id_for_channel(ctx, "100"))
+
+    assert result == "1"
 
 
 def test_row_to_commitment_defaults_missing_optional_columns() -> None:

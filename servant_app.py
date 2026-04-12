@@ -1195,6 +1195,7 @@ async def main() -> None:
             fut.result()
 
     discord.utils.setup_logging()
+    ctx.discord_loop = asyncio.get_running_loop()
 
     ctx.send_discord_message = send_discord_message
 
@@ -1263,6 +1264,7 @@ async def main() -> None:
 
     # Start a task to run routine tasks
     async def routine_tasks_loop() -> None:
+        await client.wait_until_ready()
         while True:
             now = time.time()
             for module in ctx.modules.values():
