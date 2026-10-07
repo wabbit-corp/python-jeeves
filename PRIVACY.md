@@ -41,9 +41,13 @@ Each feature sends the inputs needed to perform that feature to its provider. Pr
 
 ## Retention and deletion
 
-Vox does not apply a fixed expiry period to indexed messages, feature records, service logs, or operator-held recovery copies. Older information can remain until we delete it. You can request deletion at any time; we also remove information when it is no longer needed to operate Vox or when deletion is required by law or Discord.
+Vox does not apply a fixed expiry period to indexed messages, feature records, service logs, or operator-held recovery copies. We retain indexed discussions to support continuing conversation retrieval and contextual answers while Vox serves the community. Feature records support the reminders, commitments, and subscriptions members request. Older information can remain until we delete it. You can request deletion at any time; we also remove information when it no longer serves these operational purposes or when deletion is required by law or Discord.
 
-Deleting a message in Discord does not by itself erase Vox's stored copy. The current index can mark messages as deleted while retaining their content. Removing Vox from a server or restricting its channel access stops future access to those spaces, but does not automatically delete existing records.
+Deleting a message in Discord does not by itself erase Vox's stored copy. The current index can mark messages as deleted while retaining their content. Removing Vox from a server or restricting its channel access stops future access to those spaces. At publication, existing records are not automatically deleted.
+
+We have prepared automatic server-removal cleanup, which is awaiting deployment. Once deployed, removing Vox from a server will delete that server's active indexed messages and related metadata, conversation records, reminders, subscriptions, notification history, and configured voice transcripts. Vox will clear cached conversation context and stop pending processing. It will also check its installed servers after connecting and retry unfinished cleanup, including removals that occurred while it was offline. A temporary Discord outage will not trigger deletion. Personal records still needed in other servers or DMs will remain.
+
+Minimal server and channel identifiers will remain to enforce removal and prevent delayed work from restoring records; they contain no discussion, transcript, reminder, or subscription content. Global opt-out identifiers also remain. Reinstalling Vox starts collection afresh. Historical service logs, exports, recovery copies, and provider-held copies require separate operator cleanup; server removal alone will not erase those copies. Contact the privacy address about their deletion.
 
 To request access, correction, deletion, or restriction of processing, email [vox@wabbit.one](mailto:vox@wabbit.one) with your Discord user ID and the scope of your request. We may ask for enough information to verify that the account is yours. Do not send your Discord password, access token, or unnecessary sensitive information.
 
