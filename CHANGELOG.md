@@ -6,6 +6,7 @@ The entries below are derived from the git history and grouped by release date.
 
 ## [Unreleased]
 ### Added
+- Vox's public service privacy policy in `PRIVACY.md`, with operator contacts, data uses and providers, retention and deletion rights, opt-out status, and verified hosting controls.
 - Deployment review and shared-host migration plan for Jeeves, including SQLite preservation strategy for `discord-bots` (`deploy-plan.md`).
 - Deployment assets for the shared host: `systemd` unit, production config template, runtime install helper, state staging helper, rsync excludes, and lean runtime requirements (`deploy/*`, `requirements.runtime.txt`).
 - CODI tooling and docs: auto-annotation, training export, and workflow notes (`conversations.md`).

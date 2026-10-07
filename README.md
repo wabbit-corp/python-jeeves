@@ -1,5 +1,8 @@
 # Jeeves
 
+Read the [Vox Privacy Policy](PRIVACY.md) for data processing details and privacy requests.
+Contact [vox@wabbit.one](mailto:vox@wabbit.one) with privacy questions or deletion requests.
+
 ## LLM Throttling
 
 Interactive Vox replies use a global SQLite-backed throttle policy stored in the same index DB as the background indexer.
