@@ -79,3 +79,6 @@ all_memes.json
 /.DS_Store
 /*.jsonl
 /*.ipynb
+
+/.database.key
+/database.key

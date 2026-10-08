@@ -5,15 +5,16 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 STAMP="$(date +%Y%m%d-%H%M%S)"
 OUT_DIR="${1:-$ROOT/deploy-artifacts/state/$STAMP}"
 SQLITE_DIR="$OUT_DIR/sqlite"
-MODEL_SRC="$ROOT/codi/api/training/tmp/models"
-MODEL_DEST="$OUT_DIR/codi-models"
+PYTHON="${JEEVES_PYTHON:-$ROOT/.venv/bin/python}"
 
-if ! command -v sqlite3 >/dev/null 2>&1; then
-  echo "sqlite3 is required to stage deployment state." >&2
+if [[ ! -x "$PYTHON" ]]; then
+  echo "A runtime Python with sqlcipher3 is required; set JEEVES_PYTHON if needed." >&2
   exit 1
 fi
 
+umask 077
 mkdir -p "$SQLITE_DIR"
+cd "$ROOT"
 
 DBS=(
   "servant_index.sqlite3"
@@ -30,17 +31,7 @@ for db in "${DBS[@]}"; do
     continue
   fi
   echo "Backing up $db -> $dest"
-  sqlite3 "$src" ".backup '$dest'"
-  result="$(sqlite3 "$dest" 'PRAGMA integrity_check;')"
-  if [[ "$result" != "ok" ]]; then
-    echo "Integrity check failed for $db: $result" >&2
-    exit 1
-  fi
+  "$PYTHON" -m servant.scripts.encrypt_databases --encrypted-source "$src" "$dest"
 done
-
-if [[ -d "$MODEL_SRC" ]]; then
-  mkdir -p "$MODEL_DEST"
-  rsync -a "$MODEL_SRC/" "$MODEL_DEST/"
-fi
 
 echo "Staged deployment state in: $OUT_DIR"

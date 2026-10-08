@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import asyncio
-import sqlite3
 from pathlib import Path
 
 import discord
 import pytest
 
+from servant import database as sqlite3
 from servant import llm_throttling
 from servant.defs import GlobalContext
 from servant.modules import background_indexer

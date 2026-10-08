@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import logging
-import sqlite3
 from collections.abc import Iterable
 from pathlib import Path
 
 import discord
 
+from servant import channel_controls
+from servant import database as sqlite3
 from servant.defs import GlobalContext, RequestContext
 from typed_json import coerce_str
 
@@ -68,6 +69,8 @@ def has_staff_permissions(perms: discord.Permissions | None) -> bool:
 
 
 def require_request(ctx: GlobalContext) -> RequestContext:
+    if ctx.request is not None and ctx.privacy.is_opted_out(ctx.request.user_id):
+        raise PermissionError("Vox access is disabled for this account.")
     request = ctx.request
     if request is None:
         raise RuntimeError("Request context not set.")
@@ -255,3 +258,74 @@ async def require_staff_for_channel(ctx: GlobalContext, channel_id: str, action:
         raise PermissionError(f"Staff privileges required to {action}.")
     if not await is_staff_in_guild(ctx, request.user_id, guild_id):
         raise PermissionError(f"Staff privileges required to {action} in guild {guild_id}.")
+
+
+async def can_read_channel(ctx: GlobalContext, channel: object, user_id: str) -> bool:
+    """Recheck membership and effective channel permissions; failure always denies access."""
+    if not isinstance(channel, discord.abc.GuildChannel | discord.Thread):
+        return False
+    guild = channel.guild
+    if guild is None or ctx.privacy.is_opted_out(user_id) or not channel_controls.allows_channel(ctx, channel):
+        return False
+    try:
+        member = await guild.fetch_member(int(user_id))
+        if isinstance(channel, discord.Thread):
+            if ctx.discord_client is None or channel.parent_id is None:
+                return False
+            parent = await ctx.discord_client.fetch_channel(channel.parent_id)
+            if not isinstance(parent, discord.abc.GuildChannel) or parent.guild.id != guild.id:
+                return False
+            perms = parent.permissions_for(member)
+        else:
+            perms = channel.permissions_for(member)
+        if not perms.view_channel or not perms.read_message_history:
+            return False
+        if isinstance(channel, discord.Thread) and channel.is_private() and not perms.manage_threads:
+            await channel.fetch_member(int(user_id))
+        return True
+    except Exception:
+        return False
+
+
+async def require_search_scope(
+    ctx: GlobalContext, *, channel_ids: Iterable[str] = (), guild_id: str | None = None
+) -> discord.TextChannel | discord.Thread | discord.VoiceChannel | discord.StageChannel | discord.DMChannel:
+    """Content remains in its originating channel, including for global administrators.
+
+    A caller's private-channel access alone does not authorize sharing its contents
+    with everyone who can see the reply's destination.
+    """
+    request = require_request(ctx)
+    if request.channel_id is None or ctx.discord_client is None:
+        raise PermissionError("A live Discord channel and requester are required to retrieve messages.")
+    if any(cid != request.channel_id for cid in channel_ids) or (guild_id is not None and guild_id != request.guild_id):
+        raise PermissionError("Message retrieval is limited to the channel where you asked Vox.")
+    if request.is_dm != (request.guild_id is None):
+        raise PermissionError("Invalid Discord request scope.")
+    try:
+        # Refresh channel overwrites instead of trusting an old index or a tool-supplied server ID.
+        channel = await ctx.discord_client.fetch_channel(int(request.channel_id))
+    except Exception as exc:
+        raise PermissionError("Unable to verify current channel access.") from exc
+    if str(channel.id) != request.channel_id or not isinstance(
+        channel, discord.TextChannel | discord.Thread | discord.VoiceChannel | discord.StageChannel | discord.DMChannel
+    ):
+        raise PermissionError("Unable to verify current channel access.")
+    if request.is_dm:
+        if not isinstance(channel, discord.DMChannel) or channel.recipient is None:
+            raise PermissionError("Only your direct conversation with Vox can be retrieved.")
+        if str(channel.recipient.id) != request.user_id:
+            raise PermissionError("Only your direct conversation with Vox can be retrieved.")
+    else:
+        guild = getattr(channel, "guild", None)
+        if guild is None or str(guild.id) != request.guild_id:
+            raise PermissionError("The requested channel belongs to another server.")
+        if not await can_read_channel(ctx, channel, request.user_id):
+            raise PermissionError("You cannot currently read this channel, or Vox processing is disabled here.")
+        bot = guild.me
+        if bot is None:
+            raise PermissionError("Unable to verify Vox's channel access.")
+        perms = channel.permissions_for(bot)
+        if not perms.view_channel or not perms.read_message_history:
+            raise PermissionError("Vox cannot currently read this channel.")
+    return channel

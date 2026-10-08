@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import logging
 import re
-import sqlite3
 import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -14,7 +13,8 @@ from dateutil import tz
 from dateutil.parser import isoparse
 from defusedxml import ElementTree as ET
 
-from servant import permissions
+from servant import channel_controls, permissions
+from servant import database as sqlite3
 from servant.defs import (
     SECRET_USER_AGENT,
     GlobalContext,
@@ -124,13 +124,15 @@ def _init_db(conn: sqlite3.Connection) -> None:
         "ON event_channel_subscriptions(status, last_checked_at);"
     )
     conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_event_channel_subscriptions_channel "
-        "ON event_channel_subscriptions(channel_id);"
+        "CREATE INDEX IF NOT EXISTS idx_event_channel_subscriptions_channel ON event_channel_subscriptions(channel_id);"
     )
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_event_channel_seen_items_ts "
         "ON event_channel_seen_items(subscription_id, item_ts);"
     )
+    from servant import guild_retention
+
+    guild_retention.init_schema(conn)
     conn.commit()
 
 
@@ -816,6 +818,8 @@ async def _poll_subscription(
     if sub.status != "active":
         _LOGGER.debug("Skipping inactive event-channel subscription id=%s status=%s", sub.id, sub.status)
         return (0, 0)
+    if not channel_controls.is_allowed(ctx, sub.channel_id, sub.guild_id):
+        return (0, 0)
 
     _LOGGER.info(
         "Polling event-channel subscription id=%s kind=%s channel=%s source=%s",
@@ -1012,6 +1016,7 @@ async def event_channels_poll_routine(ctx: GlobalContext, _obj: JSON) -> JSONDic
             SELECT *
             FROM event_channel_subscriptions
             WHERE status = 'active'
+              AND NOT EXISTS(SELECT 1 FROM privacy_channel_controls p WHERE p.channel_id=event_channel_subscriptions.channel_id AND (p.allowed=0 OR p.pending=1))
               AND (last_checked_at = 0 OR (? - last_checked_at) >= (check_every_seconds * 1000))
             ORDER BY last_checked_at ASC, id ASC
             LIMIT ?

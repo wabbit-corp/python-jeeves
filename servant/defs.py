@@ -10,6 +10,9 @@ from typing import TYPE_CHECKING, TypeAlias
 
 from openai import AsyncOpenAI
 
+from servant.channel_controls import ChannelControlsState
+from servant.guild_retention import GuildRetentionState
+from servant.privacy import PrivacyState
 from typed_json import JSON, JSONDict
 
 if TYPE_CHECKING:
@@ -101,6 +104,9 @@ DiscordSendFn: TypeAlias = Callable[[str, str], Awaitable[None]]
 
 @dataclass
 class GlobalContext:
+    privacy: PrivacyState = field(default_factory=PrivacyState)
+    guild_retention: GuildRetentionState = field(default_factory=GuildRetentionState)
+    channel_controls: ChannelControlsState = field(default_factory=ChannelControlsState)
     openai_client: AsyncOpenAI | None = None
     config: dict[str, JSON] = field(default_factory=dict)
     modules: dict[str, Module] = field(default_factory=dict)
@@ -119,7 +125,7 @@ class GlobalContext:
     _indexer_last_sync_ts: float = 0.0
     _indexer_last_search_ts: float = 0.0
 
-    def with_request(self, request: RequestContext | None) -> "GlobalContext":
+    def with_request(self, request: RequestContext | None) -> GlobalContext:
         return replace(self, request=request)
 
 

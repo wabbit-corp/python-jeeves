@@ -1,5 +1,10 @@
 {
-  "include": ["servant", "typed_json", "codi", "tests", "servant_app.py"],
+  "include": [
+    "servant",
+    "typed_json",
+    "tests",
+    "servant_app.py"
+  ],
   "exclude": [
     ".venv",
     ".git",

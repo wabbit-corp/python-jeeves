@@ -1,15 +1,14 @@
 import asyncio
 import datetime as dt
 import json
-import sqlite3
 from pathlib import Path
 from types import SimpleNamespace
 from typing import cast
 
+import discord
 import pytest
 
-import discord
-
+from servant import database as sqlite3
 from servant.defs import GlobalContext
 from servant.modules import background_indexer
 from typed_json import JSONDict
@@ -208,6 +207,7 @@ def test_upsert_channels_preserves_extra_json() -> None:
 def test_index_message_payloads_preserves_embeds_on_partial_payload(tmp_path: Path) -> None:
     db_path = tmp_path / "index.sqlite3"
     ctx = GlobalContext(config={"indexer_db_path": str(db_path)})
+    ctx.channel_controls.loaded = True
 
     payload: JSONDict = {
         "id": "123",

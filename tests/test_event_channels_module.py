@@ -24,6 +24,7 @@ def _ctx_with_db(
         "admin_user_ids": [user_id],
     }
     ctx = GlobalContext(config=config)
+    ctx.channel_controls.loaded = True
     request = RequestContext(
         user_id=user_id,
         channel_id=channel_id,

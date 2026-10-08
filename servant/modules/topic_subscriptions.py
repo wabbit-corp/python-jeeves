@@ -4,7 +4,6 @@ import asyncio
 import json
 import logging
 import math
-import sqlite3
 import threading
 import time
 from collections.abc import Callable, Iterable
@@ -14,6 +13,8 @@ from typing import Protocol, TypeVar
 
 import discord
 
+from servant import channel_controls, permissions, privacy
+from servant import database as sqlite3
 from servant.defs import GlobalContext, ToolDef
 from typed_json import JSON, JSONDict, coerce_float, coerce_int, coerce_str
 
@@ -92,12 +93,15 @@ def _init_db(conn: sqlite3.Connection) -> None:
         """
     )
     conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_topic_subscriptions_guild_active " "ON topic_subscriptions(status, guild_id);"
+        "CREATE INDEX IF NOT EXISTS idx_topic_subscriptions_guild_active ON topic_subscriptions(status, guild_id);"
     )
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_topic_subscriptions_user " "ON topic_subscriptions(user_id);")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_topic_subscriptions_user ON topic_subscriptions(user_id);")
     conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_topic_notifications_channel " "ON topic_notification_cooldowns(channel_id);"
+        "CREATE INDEX IF NOT EXISTS idx_topic_notifications_channel ON topic_notification_cooldowns(channel_id);"
     )
+    from servant import guild_retention
+
+    guild_retention.init_schema(conn)
     conn.commit()
 
 
@@ -228,7 +232,8 @@ async def _with_db(ctx: GlobalContext, fn: Callable[[sqlite3.Connection], T]) ->
         finally:
             conn.close()
 
-    return await asyncio.to_thread(_run)
+    with sqlite3.processing_scope(lambda: ctx.privacy.generation):
+        return await asyncio.to_thread(_run)
 
 
 def _normalize_id(value: object) -> str | None:
@@ -286,7 +291,8 @@ async def _lookup_guild_id_from_indexer(ctx: GlobalContext, channel_id: str) -> 
             conn.close()
 
     try:
-        return await asyncio.to_thread(_run)
+        with sqlite3.processing_scope(lambda: ctx.privacy.generation):
+            return await asyncio.to_thread(_run)
     except Exception:
         _LOGGER.debug(
             "Failed to infer guild_id from indexer db for channel %s",
@@ -367,6 +373,10 @@ def _subscription_payload(subscription: TopicSubscription) -> JSONDict:
 async def topic_subscription_manage(ctx: GlobalContext, obj: JSON) -> JSONDict:
     if not isinstance(obj, dict):
         raise ValueError("Input must be an object.")
+    if ctx.privacy.is_opted_out(str(obj.get("user_id"))):
+        raise PermissionError("Vox access is disabled for this account.")
+    if ctx.request is not None and ctx.privacy.is_opted_out(ctx.request.user_id):
+        raise PermissionError("Vox access is disabled for this account.")
 
     op = obj.get("operation")
     if op not in {"create", "update", "cancel", "list"}:
@@ -377,6 +387,8 @@ async def topic_subscription_manage(ctx: GlobalContext, obj: JSON) -> JSONDict:
         resolved_guild_id = await _infer_guild_id(ctx, obj)
 
     def _logic(conn: sqlite3.Connection) -> JSONDict:
+        if ctx.privacy.is_opted_out(str(obj.get("user_id"))):
+            raise PermissionError("Vox access is disabled for this account.")
         now = _now_ms()
 
         if op == "create":
@@ -395,6 +407,8 @@ async def topic_subscription_manage(ctx: GlobalContext, obj: JSON) -> JSONDict:
             similarity_threshold = coerce_float(obj.get("similarity_threshold"), DEFAULT_SIMILARITY_THRESHOLD)
 
             topic_embedding = _serialize_embedding(_embed_text(ctx, topic))
+            if ctx.privacy.is_opted_out(user_id):
+                raise PermissionError("Vox access is disabled for this account.")
 
             cur = conn.execute(
                 """
@@ -562,7 +576,7 @@ topic_subscription_manage_tool: ToolDef = ToolDef(
                 "channel_id": {
                     "type": "string",
                     "description": (
-                        "Channel id where subscription was created " "(required for create if guild_id omitted)."
+                        "Channel id where subscription was created (required for create if guild_id omitted)."
                     ),
                 },
                 "similarity_threshold": {
@@ -591,6 +605,9 @@ def _match_subscriptions(
     content: str,
     now_ms: int,
 ) -> list[JSONDict]:
+    if ctx.privacy.is_opted_out(author_id):
+        return []
+    privacy_generation = ctx.privacy.generation
     dbfile = _db_path(ctx)
     dbfile.parent.mkdir(parents=True, exist_ok=True)
     conn = _connect(dbfile)
@@ -622,7 +639,7 @@ def _match_subscriptions(
         candidates = []
         for r in rows:
             user_id = str(r["user_id"])
-            if user_id == author_id:
+            if user_id == author_id or ctx.privacy.is_opted_out(user_id):
                 continue
             last_notified_at = cooldown_by_user.get(user_id)
             if last_notified_at is not None:
@@ -635,6 +652,8 @@ def _match_subscriptions(
             return []
 
         message_embedding = _embed_text(ctx, content)
+        if ctx.privacy.generation != privacy_generation:
+            return []
 
         matches_by_user: dict[str, list[JSONDict]] = {}
         for r in candidates:
@@ -691,12 +710,17 @@ async def _record_cooldowns(ctx: GlobalContext, *, channel_id: str, user_ids: li
 
 
 async def _send_dm(ctx: GlobalContext, user_id: str, content: str) -> None:
+    if ctx.privacy.is_opted_out(user_id):
+        return
+    privacy_generation = ctx.privacy.generation
     client = ctx.discord_client
     if client is None:
         raise RuntimeError("Discord client not initialized yet.")
 
     async def _send() -> None:
         user = await client.fetch_user(int(user_id))
+        if ctx.privacy.is_opted_out(user_id) or ctx.privacy.generation != privacy_generation:
+            return
         await user.send(content)
 
     loop = ctx.discord_loop
@@ -719,6 +743,11 @@ async def _send_dm(ctx: GlobalContext, user_id: str, content: str) -> None:
 
 
 async def topic_subscriptions_handle_message(ctx: GlobalContext, discord_message: discord.Message) -> JSONDict:
+    if ctx.privacy.is_opted_out(discord_message.author.id) or not channel_controls.allows_channel(
+        ctx, discord_message.channel
+    ):
+        return {"ok": True, "notified": 0}
+    privacy_generation = ctx.privacy.generation
     guild = getattr(discord_message, "guild", None)
     if guild is None:
         return {"ok": True, "notified": 0}
@@ -750,7 +779,7 @@ async def topic_subscriptions_handle_message(ctx: GlobalContext, discord_message
         )
         return {"ok": False, "notified": 0}
 
-    if not notifications:
+    if not notifications or ctx.privacy.generation != privacy_generation:
         return {"ok": True, "notified": 0}
 
     guild_name = str(guild.name)
@@ -763,6 +792,10 @@ async def topic_subscriptions_handle_message(ctx: GlobalContext, discord_message
     notified_users: list[str] = []
     for note in notifications:
         user_id = str(note.get("user_id"))
+        if ctx.privacy.generation != privacy_generation or ctx.privacy.is_opted_out(user_id):
+            continue
+        if not await permissions.can_read_channel(ctx, discord_message.channel, user_id):
+            continue
         topics = note.get("topics")
         if not isinstance(topics, list):
             topics = []
@@ -800,3 +833,14 @@ async def topic_subscriptions_handle_message(ctx: GlobalContext, discord_message
         await _record_cooldowns(ctx, channel_id=channel_id, user_ids=notified_users, now_ms=now_ms)
 
     return {"ok": True, "notified": len(notified_users)}
+
+
+async def purge_user_data(ctx: GlobalContext, user_id: str) -> None:
+    if not _db_path(ctx).exists():
+        return
+
+    def _delete(conn: sqlite3.Connection) -> None:
+        privacy.block_feature_records(conn, user_id, tables=("topic_subscriptions", "topic_notification_cooldowns"))
+        conn.commit()
+
+    await _with_db(ctx, _delete)

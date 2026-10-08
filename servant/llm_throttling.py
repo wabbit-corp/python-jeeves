@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import logging
-import sqlite3
 from dataclasses import dataclass
 from typing import Literal
 
+from servant import database as sqlite3
 from servant import permissions
 from servant.defs import GlobalContext
 from servant.modules import background_indexer

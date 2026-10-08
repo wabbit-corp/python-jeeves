@@ -10,6 +10,9 @@ openai:
   key: "<your-openai-key>"
 discord:
   token: "<your-discord-token>"
+  # Bare v/vox in server messages requires enabled, approved Message Content access.
+  message_content_intent: true
+  members_intent: false
 imgflip:
   username: "<your-imgflip-username>"
   password: "<your-imgflip-password>"
@@ -25,5 +28,4 @@ indexer_db_path: "/var/lib/python-jeeves/sqlite/servant_index.sqlite3"
 commitments_db_path: "/var/lib/python-jeeves/sqlite/servant_commitments.sqlite3"
 event_channels_db_path: "/var/lib/python-jeeves/sqlite/servant_event_channels.sqlite3"
 topic_subscriptions_db_path: "/var/lib/python-jeeves/sqlite/servant_topic_subscriptions.sqlite3"
-codi_model_dir: "/var/lib/python-jeeves/codi-models"
 topic_subscriptions_model_name: "sentence-transformers/all-MiniLM-L6-v2"

@@ -6,82 +6,63 @@ The entries below are derived from the git history and grouped by release date.
 
 ## [Unreleased]
 ### Added
+
+- `/vox privacy` provides private access to the policy, privacy contact, opt-out command, and deletion instructions. Moderator-only `/vox channel enable`, `status`, and privately confirmed `disable` provide durable stop-and-clear cleanup and restart recovery. Existing and new channels and threads are enabled by default subject to Discord permissions; moderators' disable choices persist, and channel controls reply privately without public announcements.
+- Message retrieval now verifies current Discord membership and channel permissions and stays within the request's channel and server, including for configured global administrators. Private threads require membership or thread-management permission; topic DMs recheck the recipient's current access.
+- Server-removal cleanup across Vox's active databases, cached context, and voice transcripts, with offline reconciliation, persistent retry markers, and protection against delayed worker writes. Other servers, DMs, and global opt-outs are preserved; reminders now record their owning server.
+- SQLCipher 4 storage for Vox's four databases, protected key-file loading, verified non-destructive migration, and encrypted deployment snapshots.
 - Vox's public service privacy policy in `PRIVACY.md`, with operator contacts, data uses and providers, retention and deletion rights, opt-out status, and verified hosting controls.
+- `/vox optout` opens a private, user-bound confirmation; confirming persists an account-wide opt-out, disables Vox features, removes active indexed messages and personal reminders/subscriptions, and excludes authored messages and voice from future processing and search. History and partial-edit safeguards prevent re-indexing withdrawn messages.
 - Deployment review and shared-host migration plan for Jeeves, including SQLite preservation strategy for `discord-bots` (`deploy-plan.md`).
 - Deployment assets for the shared host: `systemd` unit, production config template, runtime install helper, state staging helper, rsync excludes, and lean runtime requirements (`deploy/*`, `requirements.runtime.txt`).
-- CODI tooling and docs: auto-annotation, training export, and workflow notes (`conversations.md`).
-- Active learning annotation CLI for message datasets with contextual display and JSONL annotations (`make_train_data.py`).
-- Evaluation mode for `make_train_data.py` to report per-label metrics on labeled data.
 - Docker build/run support.
 - Safe URL fetch tooling for Vox with public-host validation, optional host blacklist controls, bounded JSON/text fetches, crawl4ai page extraction, and handle-based read/grep follow-ups.
 - Event channels module with admin-managed subscriptions that poll ICS calendars and YouTube feeds and post new items into Discord channels.
 - Indexed message search tool for querying the local Discord message index.
 - SQLite-backed LLM throttling policy and request-event log with Discord role exemptions for keeping specific users in high reasoning mode.
 - README docs for the LLM throttle schema, default seed values, and example `sqlite3` configuration commands.
-- Expanded property-based test suite (Hypothesis) across Brave Search, rate limiting, CODI parsing, statistics, and typed_json coercion.
+- Expanded property-based test suite (Hypothesis) across Brave Search, rate limiting, typed_json coercion.
 - QA runner `check.py` (with `check.sh` delegation) plus import-linter/coverage config updates.
-- Local type stubs for emoji/imblearn/sklearn to improve type checking.
-- Discord status post for the annotation pipeline and dataset progress (`post.md`).
-- Label examples from `labels.yml` now seed training with sample weights in `make_train_data.py`.
-- Label cue overlap helper script (`label_cue_overlap.py`).
-- Prefix rendering mode for per-author message chains in `make_train_data.py`, with render-spec tracking in embeddings and annotations.
-- Optional colorized annotation output for contexts and suggestions in `make_train_data.py`.
-- Random sampling and selection provenance fields for annotation batches in `make_train_data.py`.
-- Annotation timestamps now include `annotated_at` in `make_train_data.py`.
-- GPT-5.2 auto-annotation support with JSON schema output in `make_train_data.py`, showing auto labels before the prompt and accepting with `a`.
+- Local type stubs for emoji to improve type checking.
 - Message reply references (reply-to ids) now persist in the background indexer.
 - Commitment notes column plus a notes management tool for Vox reminders.
 - Voice invite handler that joins voice channels and transcribes speakers via Whisper (separate module).
 - Voice capture dependency for Discord voice receive plus PyNaCl runtime support.
 - External API connectivity checker script (`servant/scripts/check_external_apis.py`) with IPv4/IPv6 probes via aiohttp.
+### Removed
+- Archived and removed the unused offline model-training and annotation applications, sample corpora, and their dependencies. Current Discord tools and scheduled features remain available; privacy cleanup still removes legacy conversation records.
+
 ### Changed
+- Vox's production diagnostic journal and temporary exports now use bounded memory storage, with deployment templates preserving the journal namespace and isolated tmpfs mounts.
 - Removed production plaintext databases, retired artifacts, and historical journal files after verifying all 93 files in a local recovery archive; retained server recovery archives and host swap are encrypted. Updated the public privacy policy to describe verified storage protections.
+- Deployed Vox's privacy controls and SQLCipher databases on October 8, 2026, preserving the original databases and verified local rollback snapshots; privacy and deletion contact is now `wabbit@wabbit.one`. The service allows up to 256 MiB of locked memory for SQLCipher's protected allocations. The in-app privacy panel leads with moderator controls and reports the current channel setting.
+- Vox requests no Presence access and makes Guild Members access opt-in; it skips roster polling without that intent and passive message backfill without Message Content access.
+- Discord intent rejection now triggers one reconnect without privileged intents, keeping actual @mentions and DMs available while logging the limitations of bare v/vox triggers.
+- Ordinary incoming message text is no longer written to application info logs.
+- Added a Message Content review draft linked to Vox's public privacy policy; form answers lead with community benefits, moderator controls, and member privacy choices, with deployment and evidence notes kept distinct from proposed submission text.
 - Runtime config loading now supports `JEEVES_CONFIG_PATH`, so deploys can point at `/etc/python-jeeves/private.yml` without relying on a working-directory config file.
 - Topic subscriptions now use `fastembed` with the ONNX `sentence-transformers/all-MiniLM-L6-v2` model path, while preserving the legacy `all-MiniLM-L6-v2` config alias.
 - Runtime dependency manifests now constrain `PyNaCl` to `<1.6` and pin the shared-host Discord voice stack in `requirements.runtime.txt`, matching what `discord.py[voice]` actually accepts for clean installs.
 - Discord reply instructions now let Jeeves vary answer length based on the conversation's casualness and information needs.
 - QA tooling now emits structured output, supports quiet/parallel runs, and improves coverage/error summaries.
 - URL fetch now uses a dedicated browser-like user agent override instead of inheriting the global `web.user-agent`.
-- JSON parsing and type checking tightened across CODI/Servant (import cycles now errors).
+- JSON parsing and type checking tightened across Servant (import cycles now errors).
 - Coverage fail-under is now 15 to align with current baseline results.
 - Event-channel ICS initialization now publishes a bounded backfill window (last 7 days and next 7 days) instead of silent seeding.
 - External API connectivity checker now probes Jupiter hosts and includes OPTIONS preflight checks.
 - Interactive Vox replies now downgrade only `reasoning_effort` when the global LLM request throttle trips, while Discord administrators and configured exempt roles stay on high reasoning.
 - New index DBs now seed the global LLM throttle row with a disabled but ready-to-enable default policy: more than 5 requests per hour downgraded to `low`, and untouched legacy seed rows migrate to that default.
 - Discord message context now includes author permission metadata when known, so Jeeves can distinguish staff/admin users in conversation payloads.
-- make_train_data now reads labels from labels.yml, formats timestamps in America/New_York, and adds annotation autocomplete/suggestions.
-- Word-salad weak labeling now uses a token Markov chain score with percentile thresholding to avoid over-labeling.
-- Annotation batch selection now supports a round-robin strategy across labels (toggle via CLI).
-- Weak label training now uses deterministic sample weights instead of randomized inclusion in `make_train_data.py`.
-- Round-robin candidate selection now shortlists uncertain messages to avoid full sorts in `make_train_data.py`.
-- Embedding cache keys now include render specs and rendered text hashes in `make_train_data.py`.
-- Weak-label cue matching now normalizes punctuation for better recall in `make_train_data.py`.
-- Annotation content hashes now follow the rendered text and mismatches are skipped by default in `make_train_data.py`.
-- Round-robin selection now preserves deterministic ordering for stable seeded batches in `make_train_data.py`.
-- Annotation batching now mixes in configurable random samples for evaluation-friendly labeling in `make_train_data.py`.
-- Annotation sessions now retrain models every 10 new labels by default to refresh suggestions mid-batch.
 - Voice transcriber now disconnects after 60 seconds with no non-bot members in the channel.
 - Voice transcription defaults now chunk faster (shorter silence and max segment thresholds).
-- Annotation context now highlights weak label trigger spans in `make_train_data.py`.
-- Startup timing logs now cover each initialization step before the first annotation in `make_train_data.py`.
-- Weak label computation now skips entirely when `--weak-label-weight=0` to reduce startup time.
 ### Fixed
+- Actual Discord mentions now invoke Vox by its account ID, independently of the account or personality name; v/vox aliases remain available across personalities, and failed mention lookups no longer prevent replies.
 - Cross-user commitment lookups now default to the active request channel and reuse the current request guild context, so guild staff/owners can resolve and cancel another user's commitment without redundant channel metadata.
 - Routine tasks now wait for Discord readiness, and dispatch helpers bind the active loop before startup work begins, avoiding first-boot reminder/event task failures during deployment.
 - Background indexer now treats preserved-but-missing Discord channels as expected `not_found` cleanup instead of noisy error tracebacks while it disables stale rows from the carried-over SQLite state.
-- Guarded unigram probability computation against empty or fully-trimmed vocabularies to avoid runtime crashes.
-- Label cue matching now treats cues as regexes when needed and restores URL/link matchers in `make_train_data.py`.
-- Fixed label input tokenization so label names are parsed as whole tokens.
-- Excluded video file links from `~linkdrop` weak labeling in `make_train_data.py`.
 - Commitment check-ins now respect each commitment's `start_date`/`end_date` window instead of reminding future commitments early.
 - Commitment DB access now serializes one-time schema init/backfills and waits on transient sqlite locks instead of rerunning write-backed init on every call.
 - Commitment ownership overrides now recognize moderator/staff Discord permissions instead of requiring the `Administrator` bit.
-- Label cue matching now requires explicit `re:` prefixes for regex patterns so literal punctuation cues match reliably.
-- Timestamp formatting now supports ISO-8601 `created_at` values in `make_train_data.py`.
-- Literal cue matching now avoids substring matches (e.g., `cat` in `concatenate`) in `make_train_data.py`.
-- Prefix rendering now treats missing timestamps as boundaries in `make_train_data.py`.
-- Model training now logs total duration in `make_train_data.py`.
-- Auto-annotator schema now conforms to the Responses JSON schema subset in `make_train_data.py`.
 - Background message payload indexing no longer wipes embeds/attachments/mentions on partial updates.
 - Channel `extra_json` now keeps existing data and captures forum/voice/stage metadata.
 - Message reply index migration no longer fails when upgrading older databases.

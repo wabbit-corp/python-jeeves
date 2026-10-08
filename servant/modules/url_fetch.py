@@ -16,6 +16,7 @@ from uuid import uuid4
 
 import aiohttp
 
+from servant import database
 from servant.defs import GlobalContext, ToolDef
 from typed_json import (
     JSON,
@@ -514,6 +515,8 @@ def _normalize_for_storage(fetched: _FetchedContent) -> _FetchedContent:
 
 
 def _store_handle(ctx: GlobalContext, fetched: _FetchedContent) -> _StoredHandle:
+    if not database.processing_is_valid():
+        raise asyncio.CancelledError
     state = _module_state(ctx)
     handle = _StoredHandle(
         handle=f"urlfetch_{uuid4().hex[:12]}",

@@ -5,10 +5,10 @@ import datetime as dt
 import json
 import logging
 import re
-import sqlite3
 from collections.abc import Callable
 from typing import TypeVar
 
+from servant import database as sqlite3
 from servant import permissions
 from servant.defs import GlobalContext, ToolDef
 from servant.modules import background_indexer
@@ -217,6 +217,8 @@ def _build_where_clause(
     if guild_id is not None:
         clauses.append("m.guild_id = ?")
         params.append(guild_id)
+    else:
+        clauses.append("m.guild_id IS NULL")
 
     if author_id is not None:
         clauses.append("m.author_id = ?")
@@ -339,24 +341,11 @@ async def indexed_messages_search(ctx: GlobalContext, obj: JSON) -> JSONDict:
 
     guild_id = _parse_id(obj.get("guild_id"), "guild_id")
 
-    guild_ids: set[str] = set()
-    if guild_id is not None:
-        guild_ids.add(guild_id)
-    if channel_ids:
-        for cid in channel_ids:
-            resolved = await permissions.resolve_guild_id_for_channel(ctx, cid)
-            if resolved is None:
-                if guild_id is None:
-                    raise PermissionError(f"Unable to resolve guild for channel {cid}.")
-                continue
-            guild_ids.add(resolved)
-
-    if not guild_ids:
-        request = permissions.require_request(ctx)
-        if request.guild_id is not None:
-            guild_ids.add(request.guild_id)
-
-    await permissions.require_admin_for_guilds(ctx, guild_ids=guild_ids, action="search indexed messages")
+    await permissions.require_search_scope(ctx, channel_ids=channel_ids, guild_id=guild_id)
+    request = permissions.require_request(ctx)
+    assert request.channel_id is not None
+    channel_ids = [request.channel_id]
+    guild_id = request.guild_id
     author_id = _parse_id(obj.get("author_id"), "author_id")
 
     after_message_id = _parse_id(obj.get("after_message_id"), "after_message_id")
@@ -464,7 +453,16 @@ async def indexed_messages_search(ctx: GlobalContext, obj: JSON) -> JSONDict:
         sql = f"{base_sql}{where_sql}{order_sql} LIMIT ? OFFSET ?"
         rows = await _with_db(ctx, lambda conn: conn.execute(sql, params + [max_results, offset]).fetchall())
 
-    results = [_message_payload(row, max_content_chars) for row in rows]
+    results = [
+        _message_payload(row, max_content_chars) for row in rows if not ctx.privacy.is_opted_out(str(row["author_id"]))
+    ]
+    for result in results:
+        if result.get("reply_to_channel_id") not in (None, request.channel_id) or result.get(
+            "reply_to_guild_id"
+        ) not in (None, request.guild_id):
+            result["reply_to_message_id"] = None
+            result["reply_to_channel_id"] = None
+            result["reply_to_guild_id"] = None
 
     payload: JSONDict = {
         "ok": True,
@@ -497,7 +495,8 @@ indexed_messages_search_schema: ToolDef = ToolDef(
         "name": "indexed_messages_search",
         "description": (
             "Search the local indexed Discord messages database. Supports filtering by "
-            "guild, channel, author, and timestamp bounds with substring/exact/regex matching."
+            "author and timestamp bounds with substring/exact/regex matching. Retrieval is limited to the "
+            "current request channel and server, with current Discord permissions checked."
         ),
         "parameters": {
             "type": "object",

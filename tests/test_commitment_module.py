@@ -1,6 +1,5 @@
 import asyncio
 import datetime as dt
-import sqlite3
 import threading
 import time
 from pathlib import Path
@@ -10,6 +9,7 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
+from servant import database as sqlite3
 from servant import permissions
 from servant.defs import GlobalContext, RequestContext
 from servant.modules import commitment
@@ -24,11 +24,15 @@ def _ctx_with_db(
     guild_id: str | None = None,
     admin_user_ids: list[str] | None = None,
 ) -> GlobalContext:
-    config: JSONDict = {"commitments_db_path": str(tmp_path / "commitments.sqlite3")}
+    config: JSONDict = {
+        "commitments_db_path": str(tmp_path / "commitments.sqlite3"),
+        "indexer_db_path": str(tmp_path / "index.sqlite3"),
+    }
     if admin_user_ids is not None:
         admin_ids_json: list[JSON] = [str(item) for item in admin_user_ids]
         config["admin_user_ids"] = admin_ids_json
     ctx = GlobalContext(config=config)
+    ctx.channel_controls.loaded = True
     request = RequestContext(
         user_id=user_id,
         channel_id=channel_id,

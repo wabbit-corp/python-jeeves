@@ -1,13 +1,33 @@
 import asyncio
 import json
-import sqlite3
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import MagicMock
 
+import discord
 import pytest
 
+from servant import database as sqlite3
 from servant.defs import GlobalContext, RequestContext
 from servant.modules import background_indexer, indexed_message_search
-from typed_json import JSON, JSONDict
+from typed_json import JSONDict
+
+
+def _ctx(db_path: Path) -> GlobalContext:
+    guild = MagicMock(spec=discord.Guild)
+    guild.id = 1
+    guild.me = SimpleNamespace(id=123)
+    guild.fetch_member.return_value = SimpleNamespace(id=42)
+    channel = MagicMock(spec=discord.TextChannel)
+    channel.id = 10
+    channel.guild = guild
+    channel.permissions_for.return_value = discord.Permissions(view_channel=True, read_message_history=True)
+    client = MagicMock(spec=discord.Client)
+    client.fetch_channel.return_value = channel
+    ctx = GlobalContext(config={"indexer_db_path": str(db_path)})
+    ctx.discord_client = client
+    ctx.channel_controls.loaded = True
+    return ctx.with_request(RequestContext(user_id="42", channel_id="10", guild_id="1", is_dm=False))
 
 
 def _insert_message(
@@ -121,7 +141,7 @@ def _seed_db(db_path: Path) -> None:
     _insert_message(
         conn,
         message_id="203",
-        channel_id="11",
+        channel_id="10",
         guild_id="1",
         author_id="100",
         content="hidden",
@@ -148,10 +168,7 @@ def _get_results(result: JSONDict) -> list[JSONDict]:
 def test_indexed_messages_search_substring_filters(tmp_path: Path) -> None:
     db_path = tmp_path / "index.db"
     _seed_db(db_path)
-    admin_ids: list[JSON] = ["admin"]
-    ctx = GlobalContext(config={"indexer_db_path": str(db_path), "admin_user_ids": admin_ids}).with_request(
-        RequestContext(user_id="admin", channel_id="10", guild_id="1", is_dm=False)
-    )
+    ctx = _ctx(db_path)
 
     result = asyncio.run(
         indexed_message_search.indexed_messages_search(
@@ -161,21 +178,16 @@ def test_indexed_messages_search_substring_filters(tmp_path: Path) -> None:
     )
 
     assert result["ok"] is True
-    assert result["messages_returned"] == 2
+    assert result["messages_returned"] == 1
     results = _get_results(result)
-    assert results[0]["message_id"] == "202"
-    assert results[0]["channel_name"] == "random"
-    assert results[1]["message_id"] == "200"
-    assert results[1]["channel_name"] == "general"
+    assert results[0]["message_id"] == "200"
+    assert results[0]["channel_name"] == "general"
 
 
 def test_indexed_messages_search_case_sensitive_and_deleted(tmp_path: Path) -> None:
     db_path = tmp_path / "index.db"
     _seed_db(db_path)
-    admin_ids: list[JSON] = ["admin"]
-    ctx = GlobalContext(config={"indexer_db_path": str(db_path), "admin_user_ids": admin_ids}).with_request(
-        RequestContext(user_id="admin", channel_id="10", guild_id="1", is_dm=False)
-    )
+    ctx = _ctx(db_path)
 
     result = asyncio.run(
         indexed_message_search.indexed_messages_search(
@@ -206,7 +218,7 @@ def test_indexed_messages_search_case_sensitive_and_deleted(tmp_path: Path) -> N
     assert results[0]["message_id"] == "203"
 
 
-def test_indexed_messages_search_requires_admin(tmp_path: Path) -> None:
+def test_indexed_messages_search_requires_verified_live_access(tmp_path: Path) -> None:
     db_path = tmp_path / "index.db"
     _seed_db(db_path)
     ctx = GlobalContext(config={"indexer_db_path": str(db_path)}).with_request(
@@ -224,10 +236,7 @@ def test_indexed_messages_search_requires_admin(tmp_path: Path) -> None:
 def test_indexed_messages_search_regex_scan(tmp_path: Path) -> None:
     db_path = tmp_path / "index.db"
     _seed_db(db_path)
-    admin_ids: list[JSON] = ["admin"]
-    ctx = GlobalContext(config={"indexer_db_path": str(db_path), "admin_user_ids": admin_ids}).with_request(
-        RequestContext(user_id="admin", channel_id="10", guild_id="1", is_dm=False)
-    )
+    ctx = _ctx(db_path)
 
     result = asyncio.run(
         indexed_message_search.indexed_messages_search(
@@ -236,7 +245,7 @@ def test_indexed_messages_search_regex_scan(tmp_path: Path) -> None:
         )
     )
 
-    assert result["messages_returned"] == 2
+    assert result["messages_returned"] == 1
     rows_scanned = result.get("rows_scanned")
     assert isinstance(rows_scanned, int)
-    assert rows_scanned >= 2
+    assert rows_scanned >= 1

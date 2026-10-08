@@ -8,6 +8,7 @@ from typing import TypeAlias, TypeGuard
 
 import discord
 
+from servant import permissions
 from servant.defs import GlobalContext, ToolDef
 from typed_json import JSON, JSONDict, coerce_int, coerce_optional_str, obj_to_json
 
@@ -252,6 +253,9 @@ async def discord_search_messages(ctx: GlobalContext, obj: JSON) -> JSONDict:
         1,
         MAX_CHANNELS,
     )
+    authorized_channel = await permissions.require_search_scope(
+        ctx, channel_ids=channel_ids, guild_id=coerce_optional_str(obj.get("guild_id"))
+    )
     channels_truncated = len(channel_ids) > max_channels
     channel_ids = channel_ids[:max_channels]
 
@@ -296,11 +300,7 @@ async def discord_search_messages(ctx: GlobalContext, obj: JSON) -> JSONDict:
     truncated = False
 
     for channel_id in channel_ids:
-        try:
-            channel = await _resolve_channel(client, channel_id)
-        except Exception as e:
-            errors.append({"channel_id": str(channel_id), "error": str(e)})
-            continue
+        channel = authorized_channel
 
         if not _is_messageable(channel):
             errors.append({"channel_id": str(channel_id), "error": "channel is not messageable"})
@@ -316,6 +316,8 @@ async def discord_search_messages(ctx: GlobalContext, obj: JSON) -> JSONDict:
                 oldest_first=oldest_first,
             ):
                 messages_scanned += 1
+                if ctx.privacy.is_opted_out(message.author.id):
+                    continue
                 if author_id and str(message.author.id) != str(author_id):
                     continue
                 if not include_bots and bool(getattr(message.author, "bot", False)):
@@ -365,10 +367,19 @@ async def discord_search_members(ctx: GlobalContext, obj: JSON) -> JSONDict:
     client = _get_client(ctx)
     await client.wait_until_ready()
 
+    request = permissions.require_request(ctx)
+    await permissions.require_search_scope(
+        ctx,
+        channel_ids=[str(obj["channel_id"])] if obj.get("channel_id") is not None else [],
+        guild_id=coerce_optional_str(obj.get("guild_id")),
+    )
+    if request.guild_id is None:
+        raise PermissionError("Member search requires a server channel.")
+
     guild = await _resolve_guild(
         client,
-        guild_id=coerce_optional_str(obj.get("guild_id")),
-        channel_id=coerce_optional_str(obj.get("channel_id")),
+        guild_id=request.guild_id,
+        channel_id=request.channel_id,
     )
 
     query = _normalize_query(obj.get("query"))
@@ -397,6 +408,8 @@ async def discord_search_members(ctx: GlobalContext, obj: JSON) -> JSONDict:
 
     user_id = obj.get("user_id")
     if user_id is not None:
+        if ctx.privacy.is_opted_out(str(user_id)):
+            return {"ok": True, "results": [], "members_returned": 0}
         try:
             mid = int(str(user_id))
         except (TypeError, ValueError) as exc:
@@ -409,7 +422,7 @@ async def discord_search_members(ctx: GlobalContext, obj: JSON) -> JSONDict:
             except Exception as e:
                 return {"ok": False, "error": str(e)}
 
-        if member:
+        if member and not ctx.privacy.is_opted_out(member.id):
             results.append(_member_payload(member, include_roles))
         return {
             "ok": True,
@@ -438,6 +451,8 @@ async def discord_search_members(ctx: GlobalContext, obj: JSON) -> JSONDict:
 
     async for member in _iter_members():
         members_scanned += 1
+        if ctx.privacy.is_opted_out(member.id):
+            continue
         if members_scanned > scan_limit:
             break
         if not include_bots and bool(getattr(member, "bot", False)):
@@ -495,10 +510,19 @@ async def discord_search_channels(ctx: GlobalContext, obj: JSON) -> JSONDict:
     client = _get_client(ctx)
     await client.wait_until_ready()
 
+    request = permissions.require_request(ctx)
+    await permissions.require_search_scope(
+        ctx,
+        channel_ids=[str(obj["channel_id"])] if obj.get("channel_id") is not None else [],
+        guild_id=coerce_optional_str(obj.get("guild_id")),
+    )
+    if request.guild_id is None:
+        raise PermissionError("Channel search requires a server channel.")
+
     guild = await _resolve_guild(
         client,
-        guild_id=coerce_optional_str(obj.get("guild_id")),
-        channel_id=coerce_optional_str(obj.get("channel_id")),
+        guild_id=request.guild_id,
+        channel_id=request.channel_id,
     )
 
     query = _normalize_query(obj.get("query"))
@@ -523,6 +547,8 @@ async def discord_search_channels(ctx: GlobalContext, obj: JSON) -> JSONDict:
 
     results: list[JSONDict] = []
     for channel in channels:
+        if str(channel.id) != request.channel_id:
+            continue
         type_name = _channel_type_name(channel).lower()
         if type_filters and type_name not in type_filters:
             continue

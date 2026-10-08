@@ -3,14 +3,14 @@ from __future__ import annotations
 import asyncio
 import datetime as dt
 import logging
-import sqlite3
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TypeVar
 
-from servant import permissions
+from servant import channel_controls, permissions, privacy
+from servant import database as sqlite3
 from servant.defs import GlobalContext, RoutineTask, ToolDef
 from typed_json import JSON, JSONDict, coerce_int, coerce_str
 
@@ -36,6 +36,7 @@ _REQUIRED_COMMITMENT_COLUMNS = frozenset(
         "notes",
         "user_id",
         "channel_id",
+        "guild_id",
         "start_date",
         "end_date",
         "interval_days",
@@ -215,6 +216,9 @@ def _ensure_commitments_columns(conn: sqlite3.Connection) -> None:
             now = _now_ms()
         return now
 
+    if "guild_id" not in columns:
+        conn.execute("ALTER TABLE commitments ADD COLUMN guild_id TEXT;")
+
     if "interval_days" not in columns:
         _LOGGER.info("Adding missing column commitments.interval_days")
         conn.execute("ALTER TABLE commitments ADD COLUMN interval_days INTEGER NOT NULL DEFAULT 5;")
@@ -273,6 +277,7 @@ def _init_db(conn: sqlite3.Connection) -> None:
             notes TEXT NULL,
             user_id TEXT NOT NULL,
             channel_id TEXT NOT NULL,
+            guild_id TEXT,
             start_date TEXT NOT NULL,               -- YYYY-MM-DD
             end_date TEXT NOT NULL,                 -- YYYY-MM-DD
             interval_days INTEGER NOT NULL DEFAULT 5,
@@ -283,9 +288,12 @@ def _init_db(conn: sqlite3.Connection) -> None:
         );
         """
     )
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_commitments_active_channel " "ON commitments(status, channel_id);")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_commitments_user " "ON commitments(user_id);")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_commitments_active_channel ON commitments(status, channel_id);")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_commitments_user ON commitments(user_id);")
+    from servant import guild_retention
+
     _ensure_commitments_columns(conn)
+    guild_retention.init_schema(conn)
     _migrate_timestamp_columns(conn)
     conn.commit()
 
@@ -420,7 +428,8 @@ async def _with_db(ctx: GlobalContext, fn: Callable[[sqlite3.Connection], T]) ->
         finally:
             conn.close()
 
-    return await asyncio.to_thread(_run)
+    with sqlite3.processing_scope(lambda: ctx.privacy.generation):
+        return await asyncio.to_thread(_run)
 
 
 async def _fetch_owner_channel(ctx: GlobalContext, commitment_id: int) -> tuple[str, str]:
@@ -460,6 +469,8 @@ async def commitment_manage(ctx: GlobalContext, obj: JSON) -> JSONDict:
     if not isinstance(obj, dict):
         raise ValueError("Input must be an object.")
     payload = dict(obj)
+    if ctx.privacy.is_opted_out(str(payload.get("user_id"))):
+        raise PermissionError("Vox access is disabled for this account.")
 
     op = payload.get("operation")
     if op not in {"create", "update", "cancel", "list"}:
@@ -484,7 +495,12 @@ async def commitment_manage(ctx: GlobalContext, obj: JSON) -> JSONDict:
         list_channel_id: str | None = str(channel_id_raw) if channel_id_raw is not None else None
         user_id_raw = payload.get("user_id")
         list_user_id: str | None = str(user_id_raw) if user_id_raw is not None else None
-        if list_channel_id is None and list_user_id is not None and list_user_id != request_user_id and not is_global_admin:
+        if (
+            list_channel_id is None
+            and list_user_id is not None
+            and list_user_id != request_user_id
+            and not is_global_admin
+        ):
             request_channel_id = request.channel_id
             if request_channel_id is not None:
                 list_channel_id = request_channel_id
@@ -507,7 +523,13 @@ async def commitment_manage(ctx: GlobalContext, obj: JSON) -> JSONDict:
                 "modify another user's commitments",
             )
 
+    destination_guild_id: str | None = None
+    if op == "create" or (op == "update" and payload.get("channel_id") is not None):
+        destination_guild_id = await permissions.resolve_guild_id_for_channel(ctx, str(payload["channel_id"]))
+
     def _logic(conn: sqlite3.Connection) -> JSONDict:
+        if ctx.privacy.is_opted_out(str(payload.get("user_id"))):
+            raise PermissionError("Vox access is disabled for this account.")
         now = _now_ms()
 
         if op == "create":
@@ -535,16 +557,17 @@ async def commitment_manage(ctx: GlobalContext, obj: JSON) -> JSONDict:
             cur = conn.execute(
                 """
                 INSERT INTO commitments
-                    (name, description, user_id, channel_id, start_date, end_date,
+                    (name, description, user_id, channel_id, guild_id, start_date, end_date,
                      interval_days, last_checkin_date, status, created_at, updated_at)
                 VALUES
-                    (?, ?, ?, ?, ?, ?, ?, NULL, 'active', ?, ?)
+                    (?, ?, ?, ?, ?, ?, ?, ?, NULL, 'active', ?, ?)
                 """,
                 (
                     name,
                     description,
                     user_id,
                     channel_id,
+                    destination_guild_id,
                     start_date,
                     end_date,
                     interval_days,
@@ -588,6 +611,10 @@ async def commitment_manage(ctx: GlobalContext, obj: JSON) -> JSONDict:
 
             if not sets:
                 raise ValueError("No updatable fields provided.")
+
+            if payload.get("channel_id") is not None:
+                sets.append("guild_id = ?")
+                update_params.append(destination_guild_id)
 
             # Validate date logic if either date is changing.
             if ("start_date" in payload) or ("end_date" in payload):
@@ -845,6 +872,7 @@ async def commitment_checkin_task(ctx: GlobalContext, _obj: JSON) -> JSONDict:
         raise RuntimeError("Vox reply function not initialized.")
 
     today = dt.date.today()
+    privacy_generation = ctx.privacy.generation
     today_s = today.isoformat()
     now = _now_ms()
     dbfile = _db_path(ctx)
@@ -876,6 +904,12 @@ async def commitment_checkin_task(ctx: GlobalContext, _obj: JSON) -> JSONDict:
         due_by_channel: dict[str, list[Commitment]] = {}
 
         for r in rows:
+            if ctx.privacy.is_opted_out(str(r["user_id"])):
+                continue
+            if not channel_controls.is_allowed(
+                ctx, str(r["channel_id"]), str(r["guild_id"]) if r["guild_id"] is not None else None
+            ):
+                continue
             try:
                 c = _row_to_commitment(r)
             except Exception:
@@ -892,6 +926,11 @@ async def commitment_checkin_task(ctx: GlobalContext, _obj: JSON) -> JSONDict:
         channels_pinged = 0
         channels_failed = 0
         for channel_id, commitments in due_by_channel.items():
+            if ctx.privacy.generation != privacy_generation:
+                break
+            commitments = [c for c in commitments if not ctx.privacy.is_opted_out(c.user_id)]
+            if not commitments:
+                continue
             # Group by user
             by_user: dict[str, list[Commitment]] = {}
             for c in commitments:
@@ -970,6 +1009,17 @@ async def commitment_checkin_task(ctx: GlobalContext, _obj: JSON) -> JSONDict:
 
     # Run in thread (sqlite is sync)
     return await _with_db(ctx, lambda conn: asyncio.run(_work(conn)))
+
+
+async def purge_user_data(ctx: GlobalContext, user_id: str) -> None:
+    if not _db_path(ctx).exists():
+        return
+
+    def _delete(conn: sqlite3.Connection) -> None:
+        privacy.block_feature_records(conn, user_id, tables=("commitments",))
+        conn.commit()
+
+    await _with_db(ctx, _delete)
 
 
 # NOTE: RoutineTask.function signature is AsyncToolCallback(ctx, obj).

@@ -4,7 +4,6 @@ import asyncio
 import datetime as dt
 import json
 import logging
-import sqlite3
 import time
 from collections.abc import AsyncIterable, Callable, Iterable, Sequence
 from pathlib import Path
@@ -13,6 +12,8 @@ from typing import TypeVar
 import discord
 from discord.http import Route
 
+from servant import channel_controls, permissions
+from servant import database as sqlite3
 from servant.defs import GlobalContext, RoutineTask, ToolDef
 from typed_json import JSON, JSONDict, coerce_int, coerce_snowflake, coerce_str
 
@@ -195,7 +196,7 @@ def _ensure_channel_state_pins_fields(conn: sqlite3.Connection) -> None:
     columns = {row["name"] for row in conn.execute("PRAGMA table_info(channel_state)")}
     if "pins_last_checked_at" not in columns:
         conn.execute("ALTER TABLE channel_state ADD COLUMN pins_last_checked_at INTEGER;")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_channel_state_pins_check " "ON channel_state(pins_last_checked_at);")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_channel_state_pins_check ON channel_state(pins_last_checked_at);")
 
 
 def _ensure_guild_state_scan_started_at(conn: sqlite3.Connection) -> None:
@@ -378,7 +379,7 @@ def _init_db(conn: sqlite3.Connection) -> None:
         );
         """
     )
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_guild_members_user_id " "ON guild_members(user_id);")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_guild_members_user_id ON guild_members(user_id);")
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS messages (
@@ -402,14 +403,14 @@ def _init_db(conn: sqlite3.Connection) -> None:
         );
         """
     )
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_channel_id " "ON messages(channel_id);")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_guild_id " "ON messages(guild_id);")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_author_id " "ON messages(author_id);")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_channel_created " "ON messages(channel_id, created_at);")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_guild_created " "ON messages(guild_id, created_at);")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_author_created " "ON messages(author_id, created_at);")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_deleted_at " "ON messages(deleted_at);")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_pinned " "ON messages(channel_id, pinned);")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_channel_id ON messages(channel_id);")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_guild_id ON messages(guild_id);")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_author_id ON messages(author_id);")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_channel_created ON messages(channel_id, created_at);")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_guild_created ON messages(guild_id, created_at);")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_author_created ON messages(author_id, created_at);")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_deleted_at ON messages(deleted_at);")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_pinned ON messages(channel_id, pinned);")
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS message_user_mentions (
@@ -420,7 +421,7 @@ def _init_db(conn: sqlite3.Connection) -> None:
         );
         """
     )
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_message_user_mentions_user_id " "ON message_user_mentions(user_id);")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_message_user_mentions_user_id ON message_user_mentions(user_id);")
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS message_role_mentions (
@@ -430,7 +431,7 @@ def _init_db(conn: sqlite3.Connection) -> None:
         );
         """
     )
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_message_role_mentions_role " "ON message_role_mentions(role_id);")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_message_role_mentions_role ON message_role_mentions(role_id);")
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS message_channel_mentions (
@@ -441,7 +442,7 @@ def _init_db(conn: sqlite3.Connection) -> None:
         """
     )
     conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_message_channel_mentions_channel " "ON message_channel_mentions(channel_id);"
+        "CREATE INDEX IF NOT EXISTS idx_message_channel_mentions_channel ON message_channel_mentions(channel_id);"
     )
     conn.execute(
         """
@@ -464,9 +465,9 @@ def _init_db(conn: sqlite3.Connection) -> None:
         );
         """
     )
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_message_attachments_channel " "ON message_attachments(channel_id);")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_message_attachments_guild " "ON message_attachments(guild_id);")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_message_attachments_message_id " "ON message_attachments(message_id);")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_message_attachments_channel ON message_attachments(channel_id);")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_message_attachments_guild ON message_attachments(guild_id);")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_message_attachments_message_id ON message_attachments(message_id);")
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS message_embeds (
@@ -479,7 +480,7 @@ def _init_db(conn: sqlite3.Connection) -> None:
         );
         """
     )
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_message_embeds_message_id " "ON message_embeds(message_id);")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_message_embeds_message_id ON message_embeds(message_id);")
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS channel_state (
@@ -512,7 +513,7 @@ def _init_db(conn: sqlite3.Connection) -> None:
         """
     )
     conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_channel_state_backfill " "ON channel_state(backfill_done, last_indexed_at);"
+        "CREATE INDEX IF NOT EXISTS idx_channel_state_backfill ON channel_state(backfill_done, last_indexed_at);"
     )
     conn.execute(
         """
@@ -560,7 +561,7 @@ def _init_db(conn: sqlite3.Connection) -> None:
         );
         """
     )
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_guild_member_roles_role " "ON guild_member_roles(guild_id, role_id);")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_guild_member_roles_role ON guild_member_roles(guild_id, role_id);")
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS guild_emojis (
@@ -604,7 +605,7 @@ def _init_db(conn: sqlite3.Connection) -> None:
         );
         """
     )
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_message_reactions_message_id " "ON message_reactions(message_id);")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_message_reactions_message_id ON message_reactions(message_id);")
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS thread_parent_state (
@@ -660,13 +661,9 @@ def _init_db(conn: sqlite3.Connection) -> None:
         """
     )
     conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_llm_request_events_user_created "
-        "ON llm_request_events(user_id, created_at);"
+        "CREATE INDEX IF NOT EXISTS idx_llm_request_events_user_created ON llm_request_events(user_id, created_at);"
     )
-    conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_llm_request_events_created_at "
-        "ON llm_request_events(created_at);"
-    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_llm_request_events_created_at ON llm_request_events(created_at);")
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS llm_high_reasoning_exempt_roles (
@@ -694,12 +691,16 @@ def _init_db(conn: sqlite3.Connection) -> None:
     _ensure_channel_state_search_fields(conn)
     _ensure_channel_state_pins_fields(conn)
     conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_channel_state_search " "ON channel_state(search_done, search_last_indexed_at);"
+        "CREATE INDEX IF NOT EXISTS idx_channel_state_search ON channel_state(search_done, search_last_indexed_at);"
     )
     _ensure_guild_state_scan_started_at(conn)
     _ensure_guild_state_scan_completed_at(conn)
     _ensure_guild_state_error_fields(conn)
     _ensure_channels_extra_json(conn)
+    from servant import guild_retention, privacy
+
+    guild_retention.init_schema(conn)
+    privacy.init_schema(conn)
     _migrate_default_llm_throttle_policy(conn)
     _migrate_timestamp_columns(conn)
     conn.commit()
@@ -711,15 +712,16 @@ async def init_db(ctx: GlobalContext) -> None:
 
     dbfile = _db_path(ctx)
 
-    def _run() -> None:
+    def _run() -> set[str]:
         dbfile.parent.mkdir(parents=True, exist_ok=True)
         conn = _connect(dbfile)
         try:
             _init_db(conn)
+            return {str(row[0]) for row in conn.execute("SELECT user_id FROM privacy_opt_outs")}
         finally:
             conn.close()
 
-    await asyncio.to_thread(_run)
+    ctx.privacy.opted_out_users.update(await asyncio.to_thread(_run))
     ctx._db_initialized = True
 
 
@@ -740,7 +742,18 @@ async def _with_db(ctx: GlobalContext, fn: Callable[[sqlite3.Connection], T]) ->
         finally:
             conn.close()
 
-    return await asyncio.to_thread(_run)
+    with sqlite3.processing_scope(lambda: ctx.privacy.generation):
+        return await asyncio.to_thread(_run)
+
+
+async def confirm_privacy_opt_out(ctx: GlobalContext, user_id: str) -> None:
+    from servant import privacy
+
+    def _write(conn: sqlite3.Connection) -> None:
+        conn.execute("BEGIN IMMEDIATE")
+        privacy.confirm_in_database(conn, user_id, _now_ms())
+
+    await _with_db(ctx, _write)
 
 
 def _now_ms() -> int:
@@ -884,7 +897,9 @@ def _get_int_config(ctx: GlobalContext, key: str, default: int) -> int:
     return coerce_int(raw, default)
 
 
-def _guild_row(guild: discord.Guild, now: int) -> tuple[
+def _guild_row(
+    guild: discord.Guild, now: int
+) -> tuple[
     str,
     str,
     str | None,
@@ -913,7 +928,9 @@ def _guild_row(guild: discord.Guild, now: int) -> tuple[
     )
 
 
-def _channel_row(channel: discord.abc.GuildChannel | discord.Thread, guild_id: int, now: int) -> tuple[
+def _channel_row(
+    channel: discord.abc.GuildChannel | discord.Thread, guild_id: int, now: int
+) -> tuple[
     str,
     str,
     str,
@@ -1050,7 +1067,9 @@ def _channel_row(channel: discord.abc.GuildChannel | discord.Thread, guild_id: i
     )
 
 
-def _user_row(user: discord.abc.User, now: int) -> tuple[
+def _user_row(
+    user: discord.abc.User, now: int
+) -> tuple[
     str,
     str,
     str,
@@ -1116,7 +1135,9 @@ def _user_row_from_payload(
     )
 
 
-def _role_row(role: discord.Role, now: int) -> tuple[
+def _role_row(
+    role: discord.Role, now: int
+) -> tuple[
     str,
     str,
     str,
@@ -1159,7 +1180,9 @@ def _role_row(role: discord.Role, now: int) -> tuple[
     )
 
 
-def _emoji_row(emoji: discord.Emoji, guild_id: str, now: int) -> tuple[
+def _emoji_row(
+    emoji: discord.Emoji, guild_id: str, now: int
+) -> tuple[
     str,
     str,
     str,
@@ -1181,7 +1204,9 @@ def _emoji_row(emoji: discord.Emoji, guild_id: str, now: int) -> tuple[
     )
 
 
-def _sticker_row(sticker: discord.StickerItem, guild_id: str, now: int) -> tuple[
+def _sticker_row(
+    sticker: discord.StickerItem, guild_id: str, now: int
+) -> tuple[
     str,
     str,
     str,
@@ -1286,7 +1311,9 @@ def _reaction_rows_from_payload(*, message_id: str, reactions: JSON, now: int) -
     return rows
 
 
-def _member_row(member: discord.Member, now: int, left_at: int | None = None) -> tuple[
+def _member_row(
+    member: discord.Member, now: int, left_at: int | None = None
+) -> tuple[
     str,
     str,
     str | None,
@@ -1355,7 +1382,9 @@ def _reply_ref_from_payload(payload: JSONDict) -> tuple[str | None, str | None, 
     )
 
 
-def _message_row(message: discord.Message, now: int) -> tuple[
+def _message_row(
+    message: discord.Message, now: int
+) -> tuple[
     str,
     str,
     str | None,
@@ -1398,7 +1427,9 @@ def _message_row(message: discord.Message, now: int) -> tuple[
     )
 
 
-def _message_row_from_payload(payload: JSON, *, channel_id: str | None, guild_id: str | None) -> (
+def _message_row_from_payload(
+    payload: JSON, *, channel_id: str | None, guild_id: str | None
+) -> (
     tuple[
         str,
         str | None,
@@ -1678,7 +1709,9 @@ def _is_messageable(channel: object) -> bool:
     return hasattr(channel, "history")
 
 
-def _can_read_channel(channel: object) -> bool:
+def _can_read_channel(ctx: GlobalContext, channel: object) -> bool:
+    if not channel_controls.allows_channel(ctx, channel):
+        return False
     if not _is_messageable(channel):
         return False
     guild = getattr(channel, "guild", None)
@@ -1687,9 +1720,9 @@ def _can_read_channel(channel: object) -> bool:
     me = getattr(guild, "me", None)
     perms_for = getattr(channel, "permissions_for", None)
     if me is None or not callable(perms_for):
-        return True
+        return False
     perms = perms_for(me)
-    return bool(getattr(perms, "view_channel", True)) and bool(getattr(perms, "read_message_history", True))
+    return bool(getattr(perms, "view_channel", False)) and bool(getattr(perms, "read_message_history", False))
 
 
 def _upsert_guilds(conn: sqlite3.Connection, rows: list[RowTuple]) -> None:
@@ -1877,7 +1910,11 @@ def _replace_guild_stickers(
     )
 
 
-def _upsert_users(conn: sqlite3.Connection, rows: list[RowTuple]) -> None:
+def _upsert_users(conn: sqlite3.Connection, rows: list[RowTuple], *, guild_id: str | None = None) -> None:
+    from servant import guild_retention
+
+    if guild_retention.guild_is_removed(conn, guild_id):
+        return
     if not rows:
         return
     conn.executemany(
@@ -2157,6 +2194,7 @@ def _pick_channel_state_backfill(conn: sqlite3.Connection, now: int) -> sqlite3.
         SELECT channel_id, guild_id, last_before_id, latest_seen_id, backfill_done, fetch_error_count
         FROM channel_state
         WHERE backfill_done = 0
+          AND NOT EXISTS(SELECT 1 FROM privacy_channel_controls p WHERE p.channel_id=channel_state.channel_id AND (p.allowed=0 OR p.pending=1))
           AND (disabled_until IS NULL OR disabled_until <= ?)
           AND (fetch_forbidden_until IS NULL OR fetch_forbidden_until <= ?)
         ORDER BY last_indexed_at IS NOT NULL, last_indexed_at ASC
@@ -2173,6 +2211,7 @@ def _pick_channel_state_tail(conn: sqlite3.Connection, now: int) -> sqlite3.Row 
         SELECT channel_id, guild_id, last_before_id, latest_seen_id, backfill_done, fetch_error_count
         FROM channel_state
         WHERE (disabled_until IS NULL OR disabled_until <= ?)
+          AND NOT EXISTS(SELECT 1 FROM privacy_channel_controls p WHERE p.channel_id=channel_state.channel_id AND (p.allowed=0 OR p.pending=1))
           AND (fetch_forbidden_until IS NULL OR fetch_forbidden_until <= ?)
           AND latest_seen_id IS NOT NULL
         ORDER BY last_indexed_at IS NOT NULL, last_indexed_at ASC
@@ -2189,6 +2228,7 @@ def _pick_channel_state_search(conn: sqlite3.Connection, now: int) -> sqlite3.Ro
         SELECT channel_id, guild_id, last_before_id, latest_seen_id, backfill_done, search_before_id, search_done, fetch_error_count, search_forbidden_count
         FROM channel_state
         WHERE COALESCE(search_done, 0) = 0
+          AND NOT EXISTS(SELECT 1 FROM privacy_channel_controls p WHERE p.channel_id=channel_state.channel_id AND (p.allowed=0 OR p.pending=1))
           AND (disabled_until IS NULL OR disabled_until <= ?)
           AND (fetch_forbidden_until IS NULL OR fetch_forbidden_until <= ?)
           AND (search_forbidden_until IS NULL OR search_forbidden_until <= ?)
@@ -2206,6 +2246,7 @@ def _pick_channel_state_pins(conn: sqlite3.Connection, now: int, check_before: i
         SELECT channel_id, guild_id
         FROM channel_state
         WHERE (disabled_until IS NULL OR disabled_until <= ?)
+          AND NOT EXISTS(SELECT 1 FROM privacy_channel_controls p WHERE p.channel_id=channel_state.channel_id AND (p.allowed=0 OR p.pending=1))
           AND (fetch_forbidden_until IS NULL OR fetch_forbidden_until <= ?)
           AND (pins_last_checked_at IS NULL OR pins_last_checked_at <= ?)
         ORDER BY pins_last_checked_at IS NOT NULL, pins_last_checked_at ASC
@@ -2233,9 +2274,9 @@ def _pick_guild_state(conn: sqlite3.Connection, rescan_cutoff: int | None) -> sq
         """
         SELECT guild_id, member_after_id, member_latest_id, scan_started_at, backfill_done, scan_completed_at
         FROM guild_state
-        WHERE backfill_done = 0
+        WHERE (backfill_done = 0
            OR scan_completed_at IS NULL
-           OR scan_completed_at < ?
+           OR scan_completed_at < ?)
         ORDER BY last_indexed_at IS NOT NULL, last_indexed_at ASC
         LIMIT 1
         """,
@@ -2251,8 +2292,9 @@ def _pick_thread_parent_state(conn: sqlite3.Connection) -> sqlite3.Row | None:
                public_before_ts, private_before_ts,
                public_done, private_done
         FROM thread_parent_state
-        WHERE COALESCE(public_done, 0) = 0
-           OR COALESCE(private_done, 0) = 0
+        WHERE (COALESCE(public_done, 0) = 0
+           OR COALESCE(private_done, 0) = 0)
+          AND NOT EXISTS(SELECT 1 FROM privacy_channel_controls p WHERE p.channel_id=thread_parent_state.parent_channel_id AND (p.allowed=0 OR p.pending=1))
         ORDER BY updated_at IS NOT NULL, updated_at ASC
         LIMIT 1
         """
@@ -2822,6 +2864,8 @@ async def _sync_guilds_and_channels(ctx: GlobalContext, guilds: list[discord.Gui
         return []
 
     def _add_channel(channel: discord.abc.GuildChannel | discord.Thread, guild_id: int) -> None:
+        if not channel_controls.allows_channel(ctx, channel):
+            return
         row = _channel_row(channel, guild_id, now)
         channel_id = row[0]
         if channel_id in seen_channel_ids:
@@ -2832,6 +2876,8 @@ async def _sync_guilds_and_channels(ctx: GlobalContext, guilds: list[discord.Gui
             channel_state_rows.append((channel_id, str(guild_id), now))
 
     for guild in guilds:
+        if not channel_controls.allows_guild(ctx, str(guild.id)):
+            continue
         guild_rows.append(_guild_row(guild, now))
         guild_state_rows.append((str(guild.id), now))
         for role in getattr(guild, "roles", []) or []:
@@ -2859,7 +2905,7 @@ async def _sync_guilds_and_channels(ctx: GlobalContext, guilds: list[discord.Gui
 
         for channel in guild.channels:
             _add_channel(channel, guild.id)
-            if (
+            if channel_controls.allows_channel(ctx, channel) and (
                 hasattr(channel, "active_threads")
                 or hasattr(channel, "archived_threads")
                 or hasattr(channel, "private_archived_threads")
@@ -2949,6 +2995,8 @@ async def _index_next_thread_parent(ctx: GlobalContext, client: discord.Client, 
     private_before_ts = state["private_before_ts"]
 
     if not guild_id:
+        return {"threads_indexed": 0}
+    if not channel_controls.is_allowed(ctx, parent_channel_id, str(guild_id)):
         return {"threads_indexed": 0}
 
     backoff = await _load_channel_thread_backoff(ctx, [parent_channel_id])
@@ -3117,9 +3165,10 @@ async def _index_next_thread_parent(ctx: GlobalContext, client: discord.Client, 
     channel_state_rows: list[tuple[str, str, int]] = []
     oldest_ts: int | None = None
     for thread in threads:
-        thread_rows.append(_channel_row(thread, int(guild_id), now))
-        if _is_messageable(thread):
-            channel_state_rows.append((str(thread.id), str(guild_id), now))
+        if channel_controls.allows_channel(ctx, thread):
+            thread_rows.append(_channel_row(thread, int(guild_id), now))
+            if _is_messageable(thread):
+                channel_state_rows.append((str(thread.id), str(guild_id), now))
         archive_ts = _to_epoch_ms(getattr(thread, "archive_timestamp", None))
         if archive_ts is not None:
             if oldest_ts is None or archive_ts < oldest_ts:
@@ -3160,6 +3209,8 @@ async def _index_next_thread_parent(ctx: GlobalContext, client: discord.Client, 
 
 
 async def _index_next_guild_members(ctx: GlobalContext, client: discord.Client, member_batch_size: int) -> JSONDict:
+    if not client.intents.members:
+        return {"members_indexed": 0}
     select_now = _now_ms()
     rescan_interval_seconds = _get_int_config(
         ctx,
@@ -3174,6 +3225,8 @@ async def _index_next_guild_members(ctx: GlobalContext, client: discord.Client, 
         return {"members_indexed": 0}
 
     guild_id = str(state["guild_id"])
+    if not channel_controls.allows_guild(ctx, guild_id):
+        return {"members_indexed": 0}
     state_backfill_done = int(state["backfill_done"] or 0)
     scan_started_at = state["scan_started_at"]
     scan_completed_at = state["scan_completed_at"]
@@ -3298,7 +3351,7 @@ async def _index_next_guild_members(ctx: GlobalContext, client: discord.Client, 
 
     def _write_members(conn: sqlite3.Connection) -> None:
         new_backfill_done = int(state["backfill_done"] or 0)
-        _upsert_users(conn, list(users_by_id.values()))
+        _upsert_users(conn, list(users_by_id.values()), guild_id=guild_id)
         _upsert_members(conn, member_rows)
         _update_guild_state(
             conn,
@@ -3407,7 +3460,7 @@ async def _index_next_channel_messages_from_picker(
             await _record_channel_error(mark_done=False, error=e)
             return {"messages_indexed": 0}
 
-    if not _can_read_channel(channel):
+    if not _can_read_channel(ctx, channel):
         await _disable_channel("missing_read_permission", "missing read permission")
         return {"messages_indexed": 0}
 
@@ -3482,6 +3535,9 @@ async def _index_next_channel_messages_from_picker(
     users_by_id: dict[str, RowTuple] = {}
     message_ids: list[int] = []
     for message in messages:
+        message_ids.append(message.id)
+        if ctx.privacy.is_opted_out(message.author.id):
+            continue
         message_rows.append(_message_row(message, now))
         attachment_rows.extend(_attachment_rows(message, now))
         embed_rows.extend(_embed_rows(message, now))
@@ -3491,7 +3547,6 @@ async def _index_next_channel_messages_from_picker(
         channel_mention_rows.extend(_channel_mention_rows(message))
         user_row = _user_row(message.author, now)
         users_by_id[user_row[0]] = user_row
-        message_ids.append(message.id)
 
     min_id = min(message_ids)
     max_id = max(message_ids)
@@ -3507,7 +3562,9 @@ async def _index_next_channel_messages_from_picker(
     message_id_rows = [(str(message_id),) for message_id in message_ids]
 
     def _write(conn: sqlite3.Connection) -> None:
-        _upsert_users(conn, list(users_by_id.values()))
+        _upsert_users(
+            conn, list(users_by_id.values()), guild_id=str(state["guild_id"]) if state["guild_id"] is not None else None
+        )
         _upsert_messages(conn, message_rows)
         if message_id_rows:
             conn.executemany(
@@ -3724,7 +3781,7 @@ async def _index_next_channel_messages_search(ctx: GlobalContext, client: discor
             await _update_channel_state_for_error(mark_done=False, error=e)
             return {"messages_indexed": 0}
 
-    if not _can_read_channel(channel):
+    if not _can_read_channel(ctx, channel):
         await _disable_channel("missing_read_permission", "missing read permission")
         return {"messages_indexed": 0}
 
@@ -3860,13 +3917,15 @@ async def _reconcile_next_channel_pins(ctx: GlobalContext, client: discord.Clien
 
 
 async def _record_member_event(ctx: GlobalContext, member: discord.Member, *, mark_left: bool) -> None:
+    if ctx.privacy.is_opted_out(member.id) or not channel_controls.allows_guild(ctx, str(member.guild.id)):
+        return
     now = _now_ms()
     left_at = now if mark_left else None
     user_row = _user_row(member, now)
     member_row = _member_row(member, now, left_at=left_at)
 
     def _write(conn: sqlite3.Connection) -> None:
-        _upsert_users(conn, [user_row])
+        _upsert_users(conn, [user_row], guild_id=str(member.guild.id))
         _upsert_members(conn, [member_row])
         conn.commit()
 
@@ -3874,6 +3933,8 @@ async def _record_member_event(ctx: GlobalContext, member: discord.Member, *, ma
 
 
 async def record_message_create(ctx: GlobalContext, message: discord.Message) -> None:
+    if ctx.privacy.is_opted_out(message.author.id) or not _can_read_channel(ctx, message.channel):
+        return
     now = _now_ms()
     message_id = str(message.id)
     message_rows = [_message_row(message, now)]
@@ -3887,7 +3948,7 @@ async def record_message_create(ctx: GlobalContext, message: discord.Message) ->
     message_id_rows = [(message_id,)]
 
     def _write(conn: sqlite3.Connection) -> None:
-        _upsert_users(conn, [user_row])
+        _upsert_users(conn, [user_row], guild_id=str(message.guild.id) if message.guild else None)
         _upsert_messages(conn, message_rows)
         _bump_channel_latest_seen(
             conn,
@@ -4029,6 +4090,15 @@ async def _index_message_payloads(
     referenced_payloads: list[JSONDict] = []
 
     for payload in message_payloads:
+        payload_channel = str(payload.get("channel_id") or channel_id or "")
+        payload_guild = payload.get("guild_id") or guild_id
+        if (channel_id is not None and payload_channel != channel_id) or not channel_controls.is_allowed(
+            ctx, payload_channel, str(payload_guild) if payload_guild is not None else None
+        ):
+            continue
+        author = payload.get("author")
+        if isinstance(author, dict) and ctx.privacy.is_opted_out(str(author.get("id"))):
+            continue
         row = _message_row_from_payload(payload, channel_id=channel_id, guild_id=guild_id)
         if row is None:
             continue
@@ -4115,7 +4185,7 @@ async def _index_message_payloads(
         return {"messages_indexed": 0, "min_id": None, "max_id": None}
 
     def _write(conn: sqlite3.Connection) -> None:
-        _upsert_users(conn, list(users_by_id.values()))
+        _upsert_users(conn, list(users_by_id.values()), guild_id=guild_id)
         _upsert_messages(conn, message_rows)
         if attachments_seen:
             conn.executemany(
@@ -4297,6 +4367,10 @@ async def index_messages_search(ctx: GlobalContext, obj: JSON) -> JSONDict:
     if channel_id_raw is None:
         raise ValueError("channel_id is required.")
     channel_id = str(channel_id_raw)
+
+    await permissions.require_search_scope(
+        ctx, channel_ids=[channel_id], guild_id=str(obj["guild_id"]) if obj.get("guild_id") is not None else None
+    )
 
     guild_id = obj.get("guild_id")
     if guild_id is None:
@@ -4486,7 +4560,24 @@ async def record_message_bulk_delete(ctx: GlobalContext, payload: discord.RawBul
     await _with_db(ctx, _write)
 
 
+async def _raw_channel_allowed(ctx: GlobalContext, channel_id: int, guild_id: int | None) -> bool:
+    if guild_id is not None:
+        return channel_controls.is_allowed(ctx, str(channel_id), str(guild_id))
+    # A missing guild ID is not sufficient evidence that this is a DM.
+    if ctx.discord_client is None:
+        return False
+    try:
+        channel = ctx.discord_client.get_channel(channel_id)
+        if channel is None:
+            channel = await ctx.discord_client.fetch_channel(channel_id)
+        return isinstance(channel, discord.DMChannel) and channel_controls.allows_channel(ctx, channel)
+    except Exception:
+        return False
+
+
 async def record_message_edit(ctx: GlobalContext, payload: discord.RawMessageUpdateEvent) -> None:
+    if not await _raw_channel_allowed(ctx, payload.channel_id, payload.guild_id):
+        return
     data = payload.data
     message_id = str(payload.message_id)
     channel_id = str(payload.channel_id) if payload.channel_id is not None else None
@@ -4569,6 +4660,12 @@ async def record_message_edit(ctx: GlobalContext, payload: discord.RawMessageUpd
         return
 
     def _write(conn: sqlite3.Connection) -> None:
+        if "author_id" not in updates:
+            existing = conn.execute("SELECT author_id FROM messages WHERE message_id = ?", (message_id,)).fetchone()
+            if existing is None or existing[0] is None:
+                return
+        elif ctx.privacy.is_opted_out(str(updates["author_id"])):
+            return
         _upsert_message_fields(
             conn,
             message_id=message_id,
@@ -4657,6 +4754,8 @@ async def record_message_edit(ctx: GlobalContext, payload: discord.RawMessageUpd
 
 
 async def record_role_upsert(ctx: GlobalContext, role: discord.Role) -> None:
+    if not channel_controls.allows_guild(ctx, str(role.guild.id)):
+        return
     now = _now_ms()
     row = _role_row(role, now)
 
@@ -4668,6 +4767,8 @@ async def record_role_upsert(ctx: GlobalContext, role: discord.Role) -> None:
 
 
 async def record_role_delete(ctx: GlobalContext, role: discord.Role) -> None:
+    if not channel_controls.allows_guild(ctx, str(role.guild.id)):
+        return
     now = _now_ms()
     role_id = str(role.id)
     guild_id = str(role.guild.id) if getattr(role, "guild", None) else None
@@ -4680,6 +4781,8 @@ async def record_role_delete(ctx: GlobalContext, role: discord.Role) -> None:
 
 
 async def record_guild_emojis_update(ctx: GlobalContext, guild: discord.Guild, emojis: list[discord.Emoji]) -> None:
+    if not channel_controls.allows_guild(ctx, str(guild.id)):
+        return
     now = _now_ms()
     guild_id = str(guild.id)
     rows: list[RowTuple] = []
@@ -4701,6 +4804,8 @@ async def record_guild_emojis_update(ctx: GlobalContext, guild: discord.Guild, e
 async def record_guild_stickers_update(
     ctx: GlobalContext, guild: discord.Guild, stickers: list[discord.StickerItem]
 ) -> None:
+    if not channel_controls.allows_guild(ctx, str(guild.id)):
+        return
     now = _now_ms()
     guild_id = str(guild.id)
     rows: list[RowTuple] = []
@@ -4726,7 +4831,7 @@ async def record_channel_pins_update(ctx: GlobalContext, channel: object) -> Non
         return
     channel_id_str = str(channel_id)
     pins_fn = getattr(channel, "pins", None)
-    if pins_fn is None or not _can_read_channel(channel):
+    if pins_fn is None or not _can_read_channel(ctx, channel):
         await _with_db(
             ctx,
             lambda conn: _update_channel_state_pins_checked(
@@ -4793,7 +4898,7 @@ async def record_channel_pins_update(ctx: GlobalContext, channel: object) -> Non
     guild = getattr(channel, "guild", None)
 
     def _write(conn: sqlite3.Connection) -> None:
-        _upsert_users(conn, list(users_by_id.values()))
+        _upsert_users(conn, list(users_by_id.values()), guild_id=str(guild.id) if guild is not None else None)
         _upsert_messages(conn, message_rows)
         if max_pinned_id is not None:
             _bump_channel_latest_seen(
@@ -4906,6 +5011,8 @@ async def record_reaction_add(
     *,
     bot_user_id: int | None = None,
 ) -> None:
+    if not await _raw_channel_allowed(ctx, payload.channel_id, payload.guild_id):
+        return
     now = _now_ms()
     emoji_key = _emoji_key_from_parts(
         getattr(payload.emoji, "name", None),
@@ -4952,6 +5059,8 @@ async def record_reaction_remove(
     *,
     bot_user_id: int | None = None,
 ) -> None:
+    if not await _raw_channel_allowed(ctx, payload.channel_id, payload.guild_id):
+        return
     now = _now_ms()
     emoji_key = _emoji_key_from_parts(
         getattr(payload.emoji, "name", None),
@@ -4996,6 +5105,8 @@ async def record_reaction_remove(
 
 
 async def record_reaction_clear(ctx: GlobalContext, payload: discord.RawReactionClearEvent) -> None:
+    if not await _raw_channel_allowed(ctx, payload.channel_id, payload.guild_id):
+        return
     message_id = str(payload.message_id)
 
     def _write(conn: sqlite3.Connection) -> None:
@@ -5009,6 +5120,8 @@ async def record_reaction_clear(ctx: GlobalContext, payload: discord.RawReaction
 
 
 async def record_reaction_clear_emoji(ctx: GlobalContext, payload: discord.RawReactionClearEmojiEvent) -> None:
+    if not await _raw_channel_allowed(ctx, payload.channel_id, payload.guild_id):
+        return
     message_id = str(payload.message_id)
     emoji_key = _emoji_key_from_parts(
         getattr(payload.emoji, "name", None),
@@ -5132,6 +5245,9 @@ async def background_indexer_routine(ctx: GlobalContext, obj: JSON) -> JSONDict:
         return {"ok": False, "error": "discord client not available"}
 
     await client.wait_until_ready()
+
+    if not client.intents.message_content:
+        return {"ok": True, "messages_indexed": 0, "members_indexed": 0}
 
     guilds = list(client.guilds)
     if not guilds:

@@ -3,14 +3,18 @@ import json
 import logging
 import re
 import time
-from collections.abc import Iterable
+from collections.abc import Awaitable, Callable, Coroutine, Iterable
 from concurrent.futures import Future
+from contextlib import suppress
+from functools import wraps
 from textwrap import dedent
-from typing import TypeGuard, Union
+from typing import ParamSpec, TypeGuard, Union
 
 import discord
 import discord.utils
 import openai
+from discord import app_commands
+from discord.http import Route
 from openai import AsyncOpenAI
 from openai.types.chat import (
     ChatCompletionAssistantMessageParam,
@@ -23,7 +27,16 @@ from openai.types.chat import (
 )
 from openai.types.shared_params.function_definition import FunctionDefinition
 
-from servant import llm_throttling, permissions, voice_transcriber
+from servant import (
+    channel_controls,
+    database,
+    discord_controls,
+    guild_retention,
+    llm_throttling,
+    permissions,
+    privacy,
+    voice_transcriber,
+)
 from servant.config_loader import load_yaml_config, resolve_config_path
 from servant.defs import (
     ALL_SECRETS,
@@ -33,13 +46,15 @@ from servant.defs import (
     GlobalContext,
     Personality,
     RequestContext,
+    RoutineTaskState,
     ToolDef,
     discover_modules,
 )
-from servant.modules import background_indexer, topic_subscriptions
+from servant.modules import background_indexer, commitment, topic_subscriptions
 from typed_json import JSON, JSONDict, coerce_str, obj_to_json
 
 _LOGGER = logging.getLogger(__name__ if __name__ != "__main__" else "jove")
+P = ParamSpec("P")
 
 
 EMPTY_PERSONALITY = Personality(
@@ -68,6 +83,40 @@ You are \"Vox\" (a.k.a \"V\"), a personal butler to the users.
 * Be extraordinarily skeptical of your own correctness or stated assumptions.
 """,
 )
+
+
+def _message_addresses_bot(content: str, *, bot_user_id: int | None, personality_name: str) -> bool:
+    if bot_user_id is not None and re.search(rf"<@!?{bot_user_id}>", content):
+        return True
+
+    names = {"Vox", personality_name}
+    for name in names:
+        if name and re.search(rf"\b{re.escape(name)}\b", content, re.IGNORECASE):
+            return True
+
+    initials = {"V"}
+    if personality_name:
+        initials.add(personality_name[0])
+    for initial in initials:
+        for match in re.finditer(rf"\b{re.escape(initial)}\b", content, re.IGNORECASE):
+            preceding = content[match.start() - 1] if match.start() > 0 else " "
+            following = content[match.end()] if match.end() < len(content) else " "
+            if not (preceding.isalnum() or preceding in "=._-") and not (following.isalnum() or following in "=._-"):
+                return True
+    return False
+
+
+def _build_discord_intents(config: JSONDict, *, allow_privileged_intents: bool = True) -> discord.Intents:
+    intents = discord.Intents.default()
+    for field, default in (("message_content", True), ("members", False)):
+        key = f"discord.{field}_intent"
+        value = config.get(key, default)
+        if not isinstance(value, bool):
+            raise ValueError(f"{key} must be a YAML boolean")
+        setattr(intents, field, value and allow_privileged_intents)
+    intents.presences = False
+    intents.voice_states = True
+    return intents
 
 
 class TypingIndicator:
@@ -430,6 +479,11 @@ async def handle_incoming_message(
     cancel_event: asyncio.Event | None = None,
     reasoning_effort: llm_throttling.ReasoningEffort = llm_throttling.DEFAULT_REASONING_EFFORT,
 ) -> None:
+    if ctx.privacy.is_opted_out(discord_message.author.id):
+        return
+    if not channel_controls.allows_channel(ctx, discord_message.channel):
+        return
+    privacy_generation = ctx.privacy.generation
     channel_id_value = getattr(discord_message.channel, "id", None)
     if channel_id_value is None:
         raise RuntimeError("Discord message channel has no id.")
@@ -504,6 +558,8 @@ async def handle_incoming_message(
                     tools.append(tool_param)
 
         while True:
+            if ctx.privacy.generation != privacy_generation or ctx.privacy.is_opted_out(discord_message.author.id):
+                raise asyncio.CancelledError
             if cancel_event is not None and cancel_event.is_set():
                 raise asyncio.CancelledError
             try:
@@ -517,13 +573,16 @@ async def handle_incoming_message(
                 _LOGGER.error("OpenAI API Error: %s", e)
                 return
 
+            if ctx.privacy.generation != privacy_generation:
+                raise asyncio.CancelledError
+
             choice = response.choices[0]
             result_message = choice.message
             tool_calls_param = _tool_calls_from_result(result_message.tool_calls)
             assistant_message = _build_assistant_message(result_message.content, tool_calls_param)
             jeeves_messages.append(assistant_message)
 
-            _LOGGER.info("Jeeves response: %s", choice)
+            _LOGGER.debug("Vox response completed for message %s", discord_message.id)
 
             finish_reason = choice.finish_reason
 
@@ -597,7 +656,7 @@ async def handle_incoming_message(
                         continue
                     tool_arguments = obj_to_json(parsed_args)
 
-                    _LOGGER.info(f"Calling tool {tool_name} with arguments {tool_arguments}")
+                    _LOGGER.debug("Calling tool %s", tool_name)
 
                     tool_def: ToolDef | None = None
                     for module in ctx.modules.values():
@@ -614,6 +673,8 @@ async def handle_incoming_message(
                     else:
                         try:
                             tool_output = await tool_def.function(ctx.with_request(request_ctx), tool_arguments)
+                            if ctx.privacy.generation != privacy_generation:
+                                raise asyncio.CancelledError
                             tool_output_json = obj_to_json(tool_output)
                             if isinstance(tool_output_json, dict):
                                 tool_result = {
@@ -642,7 +703,7 @@ async def handle_incoming_message(
                                 "traceback": traceback_str,
                             }
 
-                    _LOGGER.info(f"Tool {tool_name} returned {tool_result}")
+                    _LOGGER.debug("Tool %s completed", tool_name)
 
                     msg = _build_tool_message(
                         tool_id,
@@ -659,8 +720,16 @@ async def handle_incoming_message(
             break
 
 
-async def main() -> None:
+async def main(*, allow_privileged_intents: bool = True) -> None:
     ctx = GlobalContext()
+
+    def processing_event(function: Callable[P, Awaitable[None]]) -> Callable[P, Coroutine[object, object, None]]:
+        @wraps(function)
+        async def guarded(*args: P.args, **kwargs: P.kwargs) -> None:
+            with database.processing_scope(lambda: ctx.privacy.generation):
+                await function(*args, **kwargs)
+
+        return guarded
 
     ###########################################################################
     # Config loading
@@ -680,6 +749,8 @@ async def main() -> None:
         return current
 
     ctx.config.update(_flatten_config_values(config))
+    database.read_key()
+    intents = _build_discord_intents(ctx.config, allow_privileged_intents=allow_privileged_intents)
 
     for secret in ALL_SECRETS:
         value = ctx.config.get(secret, get_value(config, secret, None))
@@ -695,9 +766,57 @@ async def main() -> None:
     openai_client = AsyncOpenAI(api_key=api_key)
     ctx.modules = discover_modules()
     ctx.openai_client = openai_client
-    await background_indexer.init_db(ctx)
+    try:
+        await background_indexer.init_db(ctx)
+        for user_id in ctx.privacy.opted_out_users:
+            await topic_subscriptions.purge_user_data(ctx, user_id)
+            await commitment.purge_user_data(ctx, user_id)
+    except BaseException:
+        await openai_client.close()
+        raise
+
+    async def confirm_opt_out(user_id: str) -> None:
+        async with ctx.privacy.lock:
+            ctx.privacy.opted_out_users.add(user_id)
+            ctx.privacy.pending_opt_outs.add(user_id)
+            ctx.privacy.generation += 1
+            ctx.channel_messages.clear()
+            for handle in list(ctx.pending_cancels.values()):
+                handle.cancel_event.set()
+                if handle.task is not None:
+                    handle.task.cancel()
+            for task in list(ctx.privacy.processing_tasks):
+                task.cancel()
+            voice_transcriber.discard_user_audio(ctx, user_id)
+            await background_indexer.confirm_privacy_opt_out(ctx, user_id)
+            await topic_subscriptions.purge_user_data(ctx, user_id)
+            await commitment.purge_user_data(ctx, user_id)
+            ctx.privacy.pending_opt_outs.discard(user_id)
 
     class MyClient(discord.Client):
+        def __init__(self, *, intents: discord.Intents) -> None:
+            # Vox owns its conversation cache and deletion lifecycle.
+            super().__init__(intents=intents, max_messages=None)
+            self.tree = app_commands.CommandTree(self)
+            group = app_commands.Group(name="vox", description="Vox commands")
+
+            @group.command(name="optout", description="Stop Vox processing your data and disable your Vox access")
+            async def optout(interaction: discord.Interaction[discord.Client]) -> None:
+                await privacy.show_confirmation(interaction, ctx, confirm_opt_out)
+
+            discord_controls.register(group, ctx)
+            self.tree.add_command(group)
+            self._vox_command = group
+
+        async def setup_hook(self) -> None:
+            if self.application_id is None:
+                raise RuntimeError("Discord application ID is unavailable during command registration.")
+            # Register /vox individually so unrelated application commands are preserved.
+            await self.http.request(
+                Route("POST", "/applications/{application_id}/commands", application_id=self.application_id),
+                json=self._vox_command.to_dict(self.tree),
+            )
+
         def _user_payload(
             self,
             user: discord.abc.User,
@@ -710,10 +829,14 @@ async def main() -> None:
             ref = discord_message.reference
             if ref is None:
                 return None
+            if getattr(ref, "channel_id", discord_message.channel.id) != discord_message.channel.id:
+                return None
+            if getattr(ref, "guild_id", None) not in (None, getattr(discord_message.guild, "id", None)):
+                return None
 
             resolved = getattr(ref, "resolved", None)
             if isinstance(resolved, discord.Message):
-                return resolved
+                return resolved if resolved.channel.id == discord_message.channel.id else None
 
             message_id = getattr(ref, "message_id", None)
             if message_id is None:
@@ -721,16 +844,7 @@ async def main() -> None:
 
             try:
                 channel = discord_message.channel
-                ref_channel_id = getattr(ref, "channel_id", None)
                 target_channel: discord.abc.Messageable = channel
-                if ref_channel_id and ref_channel_id != channel.id:
-                    resolved_channel = self.get_channel(ref_channel_id)
-                    if resolved_channel is None:
-                        resolved_channel = await self.fetch_channel(ref_channel_id)
-                    if isinstance(resolved_channel, discord.abc.Messageable):
-                        target_channel = resolved_channel
-                    else:
-                        return None
                 return await target_channel.fetch_message(message_id)
             except Exception as e:
                 _LOGGER.debug("Failed to fetch referenced message: %s", e)
@@ -747,11 +861,12 @@ async def main() -> None:
             if ref is not None:
                 referenced = await self._get_referenced_message(discord_message)
                 if referenced is not None:
-                    payload["reply_to"] = {
-                        "message_id": str(referenced.id),
-                        "author": self._user_payload(referenced.author, guild=referenced.guild),
-                        "content": referenced.content,
-                    }
+                    if not ctx.privacy.is_opted_out(referenced.author.id):
+                        payload["reply_to"] = {
+                            "message_id": str(referenced.id),
+                            "author": self._user_payload(referenced.author, guild=referenced.guild),
+                            "content": referenced.content,
+                        }
                 else:
                     message_id = getattr(ref, "message_id", None)
                     if message_id is not None:
@@ -771,7 +886,23 @@ async def main() -> None:
         async def on_ready(self) -> None:
             _LOGGER.info(f"Logged on as {self.user}!")
             ctx.discord_loop = asyncio.get_running_loop()
+            ctx.guild_retention.ready.clear()
+            await guild_retention.reconcile(ctx, lambda: self.guilds)
 
+        async def on_guild_remove(self, guild: discord.Guild) -> None:
+            await guild_retention.remove_guild(
+                ctx, str(guild.id), (str(channel.id) for channel in [*guild.channels, *guild.threads])
+            )
+
+        async def on_guild_join(self, guild: discord.Guild) -> None:
+            if str(guild.id) in ctx.guild_retention.removed_guilds:
+                # Complete interrupted deletion before allowing new records on reinstallation.
+                await guild_retention.remove_guild(ctx, str(guild.id))
+                await guild_retention.allow_guild(
+                    ctx, str(guild.id), still_installed=lambda: self.get_guild(guild.id) is not None
+                )
+
+        @processing_event
         async def on_member_join(self, member: discord.Member) -> None:
             try:
                 await background_indexer.record_member_join(ctx, member)
@@ -784,6 +915,7 @@ async def main() -> None:
                     exc_info=True,
                 )
 
+        @processing_event
         async def on_member_update(self, before: discord.Member, after: discord.Member) -> None:
             try:
                 await background_indexer.record_member_update(ctx, after)
@@ -796,6 +928,7 @@ async def main() -> None:
                     exc_info=True,
                 )
 
+        @processing_event
         async def on_member_remove(self, member: discord.Member) -> None:
             try:
                 await background_indexer.record_member_remove(ctx, member)
@@ -808,6 +941,7 @@ async def main() -> None:
                     exc_info=True,
                 )
 
+        @processing_event
         async def on_raw_message_delete(self, payload: discord.RawMessageDeleteEvent) -> None:
             try:
                 await background_indexer.record_message_delete(ctx, payload)
@@ -819,6 +953,7 @@ async def main() -> None:
                     exc_info=True,
                 )
 
+        @processing_event
         async def on_raw_message_edit(self, payload: discord.RawMessageUpdateEvent) -> None:
             try:
                 await background_indexer.record_message_edit(ctx, payload)
@@ -830,6 +965,7 @@ async def main() -> None:
                     exc_info=True,
                 )
 
+        @processing_event
         async def on_raw_bulk_message_delete(self, payload: discord.RawBulkMessageDeleteEvent) -> None:
             try:
                 await background_indexer.record_message_bulk_delete(ctx, payload)
@@ -841,6 +977,7 @@ async def main() -> None:
                     exc_info=True,
                 )
 
+        @processing_event
         async def on_guild_channel_pins_update(
             self,
             channel: discord.abc.GuildChannel | discord.Thread,
@@ -856,6 +993,7 @@ async def main() -> None:
                     exc_info=True,
                 )
 
+        @processing_event
         async def on_guild_role_create(self, role: discord.Role) -> None:
             try:
                 await background_indexer.record_role_upsert(ctx, role)
@@ -868,6 +1006,7 @@ async def main() -> None:
                     exc_info=True,
                 )
 
+        @processing_event
         async def on_guild_role_update(self, before: discord.Role, after: discord.Role) -> None:
             try:
                 await background_indexer.record_role_upsert(ctx, after)
@@ -880,6 +1019,7 @@ async def main() -> None:
                     exc_info=True,
                 )
 
+        @processing_event
         async def on_guild_role_delete(self, role: discord.Role) -> None:
             try:
                 await background_indexer.record_role_delete(ctx, role)
@@ -892,6 +1032,7 @@ async def main() -> None:
                     exc_info=True,
                 )
 
+        @processing_event
         async def on_guild_emojis_update(
             self,
             guild: discord.Guild,
@@ -908,6 +1049,7 @@ async def main() -> None:
                     exc_info=True,
                 )
 
+        @processing_event
         async def on_guild_stickers_update(
             self,
             guild: discord.Guild,
@@ -924,6 +1066,7 @@ async def main() -> None:
                     exc_info=True,
                 )
 
+        @processing_event
         async def on_raw_reaction_add(self, payload: discord.RawReactionActionEvent) -> None:
             if payload.emoji.name == "❌":
                 message_id = str(payload.message_id)
@@ -942,6 +1085,7 @@ async def main() -> None:
                     exc_info=True,
                 )
 
+        @processing_event
         async def on_raw_reaction_remove(self, payload: discord.RawReactionActionEvent) -> None:
             try:
                 await background_indexer.record_reaction_remove(
@@ -955,6 +1099,7 @@ async def main() -> None:
                     exc_info=True,
                 )
 
+        @processing_event
         async def on_raw_reaction_clear(self, payload: discord.RawReactionClearEvent) -> None:
             try:
                 await background_indexer.record_reaction_clear(ctx, payload)
@@ -966,6 +1111,7 @@ async def main() -> None:
                     exc_info=True,
                 )
 
+        @processing_event
         async def on_raw_reaction_clear_emoji(self, payload: discord.RawReactionClearEmojiEvent) -> None:
             try:
                 await background_indexer.record_reaction_clear_emoji(ctx, payload)
@@ -985,8 +1131,34 @@ async def main() -> None:
                 "discriminator": user.discriminator,
             }
 
+        @processing_event
         async def on_message(self, discord_message: discord.Message) -> None:
-            _LOGGER.info(f"Message from {discord_message.author}: {discord_message.content}")
+            if not ctx.guild_retention.ready.is_set():
+                return
+            if discord_message.guild and str(discord_message.guild.id) in ctx.guild_retention.removed_guilds:
+                return
+            if ctx.privacy.is_opted_out(discord_message.author.id):
+                return
+            if not channel_controls.allows_channel(ctx, discord_message.channel):
+                return
+            privacy_generation = ctx.privacy.generation
+            if not self.intents.message_content and not discord_message.content:
+                return
+
+            if (
+                discord_message.author != self.user
+                and _message_addresses_bot(
+                    discord_message.content, bot_user_id=self.user.id if self.user else None, personality_name="Vox"
+                )
+                and re.search(r"\bopt[\s-]?out\b", discord_message.content, re.IGNORECASE)
+            ):
+                await discord_message.channel.send(
+                    "Use `/vox optout` to review and confirm your choice privately.",
+                    allowed_mentions=discord.AllowedMentions.none(),
+                )
+                return
+
+            _LOGGER.debug("Message received: %s", discord_message.id)
 
             try:
                 await background_indexer.record_message_create(ctx, discord_message)
@@ -998,11 +1170,11 @@ async def main() -> None:
                     exc_info=True,
                 )
 
-            # if discord_message.guild is not None and str(discord_message.guild.id) == "699975135905710181":
-            #     return  # Ignore messages from this server
-
             if discord_message.author == self.user:
                 return
+
+            # if discord_message.guild is not None and str(discord_message.guild.id) == "699975135905710181":
+            #     return  # Ignore messages from this server
 
             try:
                 await topic_subscriptions.topic_subscriptions_handle_message(ctx, discord_message)
@@ -1013,17 +1185,38 @@ async def main() -> None:
                     exc_info=True,
                 )
 
+            if ctx.privacy.generation != privacy_generation:
+                return
+
             dm_content = discord_message.content
+            channel_id = str(discord_message.channel.id)
+            personality = ctx.channel_personality.setdefault(channel_id, EMPTY_PERSONALITY)
+            mentioned = _message_addresses_bot(
+                dm_content,
+                bot_user_id=self.user.id if self.user is not None else None,
+                personality_name=personality.name,
+            )
 
             # Decode <@USER_ID> mentions
-            for user_id in re.findall(r"<@!?(\d+)>", dm_content):
-                user_info = await self.fetch_user(int(user_id))
-                dm_content = dm_content.replace(f"<@{user_id}>", f"<@{user_id}:{user_info.name}>")
-
-            _LOGGER.info(f"Message from {discord_message.author}: {dm_content}")
+            user_info: discord.abc.User
+            for user_id in set(re.findall(r"<@!?(\d+)>", dm_content)):
+                if ctx.privacy.is_opted_out(user_id):
+                    continue
+                if self.user is not None and int(user_id) == self.user.id:
+                    user_info = self.user
+                else:
+                    try:
+                        user_info = await self.fetch_user(int(user_id))
+                    except discord.HTTPException:
+                        _LOGGER.warning("Could not resolve mentioned user %s", user_id, exc_info=True)
+                        continue
+                replacement = f"<@{user_id}:{user_info.name}>"
+                dm_content = dm_content.replace(f"<@{user_id}>", replacement).replace(f"<@!{user_id}>", replacement)
 
             channel_id = str(discord_message.channel.id)
             user_message_content = await self._build_user_message_content(discord_message, dm_content)
+            if ctx.privacy.generation != privacy_generation:
+                return
             ctx.channel_messages[channel_id].append(_message_to_json(_build_user_message(user_message_content)))
 
             try:
@@ -1031,48 +1224,11 @@ async def main() -> None:
             except Exception:
                 _LOGGER.error("Failed to handle voice invite message.", exc_info=True)
 
-            # React to direct mentions of the bot name or replies to its messages.
-
-            msg = dm_content
-
-            # if msg.startswith("!EXIT"):
-            #     await self.close()
-            #     sys.exit(0)
-            #     return
-
-            # if msg.startswith("!DEBUG "):
-            #     msg = msg[len("!DEBUG ") :]
-            #     debug_mode = True
-            # else:
-            #     debug_mode = False
-
-            channel_id = str(discord_message.channel.id)
-            if channel_id not in ctx.channel_personality:
-                ctx.channel_personality[channel_id] = EMPTY_PERSONALITY
-
-            personality = ctx.channel_personality[channel_id]
-            personality_name = personality.name
-            personality_name_short = personality.name[0]
-
-            # Check if the personality name is mentioned in the message.
-            mentioned = re.search(rf"\b{personality_name}\b", msg, re.IGNORECASE) is not None
-
-            # Check for single-letter mention, ensuring it's not part of a URL or similar.
-            for m in re.finditer(rf"\b{personality_name_short}\b", msg, re.IGNORECASE):
-                # Make sure it's not some sort of ?v= (part of a URL) or similar.
-                preceding_char = msg[m.start() - 1] if m.start() > 0 else " "
-                following_char = msg[m.end()] if m.end() < len(msg) else " "
-                if not (preceding_char.isalnum() or preceding_char in ["=", ".", "_", "-"]) and not (
-                    following_char.isalnum() or following_char in ["=", ".", "_", "-"]
-                ):
-                    mentioned = True
-                    break
-
             replied_to_bot = False
             if not mentioned:
                 replied_to_bot = await self._is_reply_to_self(discord_message)
 
-            if not (mentioned or replied_to_bot):
+            if not (mentioned or replied_to_bot or discord_message.guild is None):
                 return
 
             reasoning_effort = llm_throttling.DEFAULT_REASONING_EFFORT
@@ -1085,6 +1241,8 @@ async def main() -> None:
                     getattr(discord_message, "id", "unknown"),
                     exc_info=True,
                 )
+            if ctx.privacy.generation != privacy_generation:
+                return
 
             message_id = str(discord_message.id)
             cancel_event = asyncio.Event()
@@ -1113,23 +1271,14 @@ async def main() -> None:
             finally:
                 ctx.pending_cancels.pop(message_id, None)
 
-    intents = discord.Intents.default()
-    intents.message_content = True
-    intents.members = True
-    intents.guild_reactions = True
-    intents.guilds = True
-    intents.emojis_and_stickers = True
-    intents.messages = True
-    intents.reactions = True
-    intents.guild_messages = True
-    intents.voice_states = True
-
     client = MyClient(intents=intents)
     ctx.discord_client = client
 
-    async def _send_long(channel: discord.abc.Messageable, content: str) -> None:
+    async def _send_long(channel: discord.abc.Messageable, content: str, privacy_generation: int) -> None:
         content = (content or "").strip()
         while content:
+            if ctx.privacy.generation != privacy_generation:
+                return
             if len(content) <= 2000:
                 await channel.send(content)
                 return
@@ -1148,6 +1297,9 @@ async def main() -> None:
                 content = content[line_break + 1 :]
 
     async def _discord_send_impl(channel_id: str, content: str) -> None:
+        if channel_id in ctx.guild_retention.removed_channels or not database.processing_is_valid():
+            return
+        privacy_generation = ctx.privacy.generation
         await client.wait_until_ready()
 
         channel = client.get_channel(int(channel_id))
@@ -1156,7 +1308,17 @@ async def main() -> None:
         if not _is_messageable(channel):
             raise RuntimeError(f"Channel {channel_id} is not messageable.")
 
-        await _send_long(channel, content)
+        guild = getattr(channel, "guild", None)
+        if not channel_controls.allows_channel(ctx, channel):
+            return
+        if (
+            guild is not None and str(guild.id) in ctx.guild_retention.removed_guilds
+        ) or not database.processing_is_valid():
+            return
+
+        await _send_long(channel, content, privacy_generation)
+        if ctx.privacy.generation != privacy_generation:
+            return
 
         ctx.channel_messages[str(channel_id)].append(_message_to_json(_build_assistant_message(content)))
 
@@ -1199,7 +1361,11 @@ async def main() -> None:
 
     ctx.send_discord_message = send_discord_message
 
+    @processing_event
     async def _request_vox_reply_impl(channel_id: str, system_message: str, user_message: str) -> None:
+        if channel_id in ctx.guild_retention.removed_channels or not database.processing_is_valid():
+            return
+        privacy_generation = ctx.privacy.generation
         await client.wait_until_ready()
         channel = client.get_channel(int(channel_id))
         if channel is None:
@@ -1207,8 +1373,15 @@ async def main() -> None:
         if not _is_messageable(channel):
             raise RuntimeError(f"Channel {channel_id} is not messageable.")
         bot_user = client.user
+        guild = getattr(channel, "guild", None)
+        if not channel_controls.allows_channel(ctx, channel):
+            return
+        if guild is not None and str(guild.id) in ctx.guild_retention.removed_guilds:
+            return
         if bot_user is None:
             raise RuntimeError("Discord client user not available.")
+        if ctx.privacy.generation != privacy_generation:
+            return
 
         message_id = int(time.time() * 1000)
         author_payload = _user_payload(str(bot_user.id), bot_user.name)
@@ -1228,14 +1401,21 @@ async def main() -> None:
             message_id=message_id,
             content=user_message,
         )
-        await handle_incoming_message(
-            ctx=ctx,
-            client=client,
-            discord_message=synthetic_message,
-            openai_client=openai_client,
-            cancel_event=None,
-            reasoning_effort=llm_throttling.DEFAULT_REASONING_EFFORT,
+        work_task = asyncio.create_task(
+            handle_incoming_message(
+                ctx=ctx,
+                client=client,
+                discord_message=synthetic_message,
+                openai_client=openai_client,
+                cancel_event=None,
+                reasoning_effort=llm_throttling.DEFAULT_REASONING_EFFORT,
+            )
         )
+        ctx.privacy.processing_tasks.add(work_task)
+        try:
+            await work_task
+        finally:
+            ctx.privacy.processing_tasks.discard(work_task)
 
     async def request_vox_reply(channel_id: str, system_message: str, user_message: str) -> None:
         loop = getattr(ctx, "discord_loop", None)
@@ -1266,6 +1446,12 @@ async def main() -> None:
     async def routine_tasks_loop() -> None:
         await client.wait_until_ready()
         while True:
+            try:
+                await guild_retention.reconcile(ctx, lambda: client.guilds)
+            except Exception:
+                _LOGGER.error("Server retention reconciliation failed; will retry", exc_info=True)
+                await asyncio.sleep(10)
+                continue
             now = time.time()
             for module in ctx.modules.values():
                 for routine_task_state in module.routine_tasks.values():
@@ -1276,9 +1462,23 @@ async def main() -> None:
                             module.name,
                         )
                         try:
-                            await routine_task_state.function(ctx, {})
+
+                            async def run_routine(state: RoutineTaskState) -> None:
+                                with database.processing_scope(lambda: ctx.privacy.generation):
+                                    await state.function(ctx, {})
+
+                            work_task = asyncio.create_task(run_routine(routine_task_state))
+                            ctx.privacy.processing_tasks.add(work_task)
+                            try:
+                                await work_task
+                            finally:
+                                ctx.privacy.processing_tasks.discard(work_task)
                             routine_task_state.last_run_timestamp = now
                             routine_task_state.run_count += 1
+                        except asyncio.CancelledError:
+                            current_task = asyncio.current_task()
+                            if current_task is not None and current_task.cancelling():
+                                raise
                         except Exception:
                             _LOGGER.error(
                                 "Error while running routine task %s (module=%s)",
@@ -1288,14 +1488,32 @@ async def main() -> None:
                             )
             await asyncio.sleep(10)
 
-    asyncio.create_task(routine_tasks_loop())
-
     token = coerce_str(
         ctx.config.get(SECRET_DISCORD_TOKEN),
         field="discord.token",
         allow_empty=False,
     )
-    await client.start(token, reconnect=True)
+    routine_task = asyncio.create_task(routine_tasks_loop())
+    fallback = False
+    try:
+        await client.start(token, reconnect=True)
+    except discord.PrivilegedIntentsRequired:
+        if not allow_privileged_intents or not (intents.message_content or intents.members):
+            raise
+        _LOGGER.warning(
+            "Discord rejected privileged intents; reconnecting without them. "
+            "Use an actual @mention or DM to invoke Vox. Bare v/vox in server messages "
+            "and passive message indexing require Message Content access."
+        )
+        fallback = True
+    finally:
+        routine_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await routine_task
+        await client.close()
+        await openai_client.close()
+    if fallback:
+        await main(allow_privileged_intents=False)
 
 
 if __name__ == "__main__":

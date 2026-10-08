@@ -61,8 +61,7 @@ RUN apt-get update \
 COPY --from=builder --chown=app:app /app/.venv /app/.venv
 COPY --chown=app:app . ./
 
-RUN mkdir -p /app/codi/api/training/tmp/models \
-    && chown -R app:app /app
+RUN chown -R app:app /app
 
 USER app
 

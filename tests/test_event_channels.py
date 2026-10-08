@@ -21,6 +21,7 @@ def _ctx_with_db(
     if admin_user_ids is not None:
         config["admin_user_ids"] = [str(item) for item in admin_user_ids]
     ctx = GlobalContext(config=config)
+    ctx.channel_controls.loaded = True
     request = RequestContext(
         user_id=user_id,
         channel_id=channel_id,
@@ -189,9 +190,7 @@ def test_poll_seeds_then_posts_new_youtube_items(tmp_path: Path, monkeypatch: py
     sub = require_obj(created["subscription"])
     source_url = str(sub["source"])
 
-    feed_text[
-        source_url
-    ] = """<?xml version="1.0" encoding="UTF-8"?>
+    feed_text[source_url] = """<?xml version="1.0" encoding="UTF-8"?>
 <feed xmlns="http://www.w3.org/2005/Atom" xmlns:yt="http://www.youtube.com/xml/schemas/2015">
   <entry>
     <yt:videoId>v1</yt:videoId>
@@ -214,6 +213,7 @@ def test_poll_seeds_then_posts_new_youtube_items(tmp_path: Path, monkeypatch: py
         posted_messages.append(content)
 
     ctx_poll = GlobalContext(config=ctx_manage.config)
+    ctx_poll.channel_controls = ctx_manage.channel_controls
     ctx_poll.send_discord_message = _send
 
     # First poll seeds, no post.
@@ -223,9 +223,7 @@ def test_poll_seeds_then_posts_new_youtube_items(tmp_path: Path, monkeypatch: py
     assert posted_messages == []
 
     # Second poll sees a new item.
-    feed_text[
-        source_url
-    ] = """<?xml version="1.0" encoding="UTF-8"?>
+    feed_text[source_url] = """<?xml version="1.0" encoding="UTF-8"?>
 <feed xmlns="http://www.w3.org/2005/Atom" xmlns:yt="http://www.youtube.com/xml/schemas/2015">
   <entry>
     <yt:videoId>v1</yt:videoId>

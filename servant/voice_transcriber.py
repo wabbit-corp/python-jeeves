@@ -4,7 +4,10 @@ import asyncio
 import inspect
 import io
 import logging
+import os
 import re
+import shutil
+import tempfile
 import time
 import types
 import wave
@@ -14,6 +17,7 @@ from pathlib import Path
 import discord
 from openai import AsyncOpenAI
 
+from servant import channel_controls
 from servant.defs import GlobalContext
 from typed_json import coerce_str
 
@@ -154,6 +158,7 @@ class VoiceTranscriber:
         self._channel_id: int | None = None
         self._channel_name: str | None = None
         self._guild_id: int | None = None
+        self._stopped = False
 
     def attach_context(self, *, channel: discord.abc.GuildChannel | None) -> None:
         if channel is None:
@@ -165,14 +170,24 @@ class VoiceTranscriber:
     def start(self) -> None:
         if self._flush_task is not None and not self._flush_task.done():
             return
+        self._stopped = False
         self._flush_task = self._loop.create_task(self._flush_loop())
 
     def stop(self) -> None:
+        self._stopped = True
         if self._flush_task is not None:
             self._flush_task.cancel()
 
     def enqueue_audio(self, user: discord.abc.User, pcm: bytes) -> None:
-        if not pcm:
+        if (
+            self._stopped
+            or not pcm
+            or self._ctx.privacy.is_opted_out(user.id)
+            or str(self._guild_id) in self._ctx.guild_retention.removed_guilds
+            or not channel_controls.is_allowed(
+                self._ctx, str(self._channel_id), str(self._guild_id) if self._guild_id is not None else None
+            )
+        ):
             return
 
         def _handle() -> None:
@@ -181,6 +196,15 @@ class VoiceTranscriber:
             if raw_id is None:
                 return
             user_id = int(raw_id)
+            if (
+                self._stopped
+                or self._ctx.privacy.is_opted_out(user_id)
+                or str(self._guild_id) in self._ctx.guild_retention.removed_guilds
+                or not channel_controls.is_allowed(
+                    self._ctx, str(self._channel_id), str(self._guild_id) if self._guild_id is not None else None
+                )
+            ):
+                return
             user_name = getattr(user, "display_name", None) or getattr(user, "name", None) or str(raw_id)
             buffer = self._buffers.get(user_id)
             if buffer is None:
@@ -213,19 +237,37 @@ class VoiceTranscriber:
 
     async def _flush_user(self, user_id: int) -> None:
         buffer = self._buffers.pop(user_id, None)
-        if buffer is None or not buffer.pcm_chunks:
+        if buffer is None or not buffer.pcm_chunks or self._ctx.privacy.is_opted_out(user_id):
             return
         wav_bytes = buffer.pop_wav_bytes()
-        await self._transcribe_and_log(buffer, wav_bytes)
+        task = self._loop.create_task(self._transcribe_and_log(buffer, wav_bytes))
+        self._ctx.privacy.processing_tasks.add(task)
+        try:
+            await task
+        except asyncio.CancelledError:
+            current = asyncio.current_task()
+            if current is not None and current.cancelling():
+                raise
+        finally:
+            self._ctx.privacy.processing_tasks.discard(task)
 
     async def flush_all(self) -> None:
         for user_id in list(self._buffers.keys()):
             await self._flush_user(user_id)
 
     async def _transcribe_and_log(self, buffer: _UserBuffer, wav_bytes: bytes) -> None:
-        if not wav_bytes:
+        if (
+            self._stopped
+            or not wav_bytes
+            or self._ctx.privacy.is_opted_out(buffer.user_id)
+            or str(self._guild_id) in self._ctx.guild_retention.removed_guilds
+            or not channel_controls.is_allowed(
+                self._ctx, str(self._channel_id), str(self._guild_id) if self._guild_id is not None else None
+            )
+        ):
             return
         audio_file = io.BytesIO(wav_bytes)
+        generation = self._ctx.privacy.generation
         audio_file.name = "voice.wav"
         try:
             result = await self._openai_client.audio.transcriptions.create(
@@ -236,10 +278,20 @@ class VoiceTranscriber:
             _LOGGER.error("Voice transcription failed for user %s", buffer.user_id, exc_info=True)
             return
         text = getattr(result, "text", None)
+        if (
+            self._stopped
+            or self._ctx.privacy.generation != generation
+            or self._ctx.privacy.is_opted_out(buffer.user_id)
+            or str(self._guild_id) in self._ctx.guild_retention.removed_guilds
+            or not channel_controls.is_allowed(
+                self._ctx, str(self._channel_id), str(self._guild_id) if self._guild_id is not None else None
+            )
+        ):
+            return
         if not isinstance(text, str) or not text.strip():
             return
         log_line = self._format_log_line(buffer, text.strip())
-        _LOGGER.info(log_line)
+        _LOGGER.debug("Voice transcription completed for guild %s channel %s", self._guild_id, self._channel_id)
         await self._append_transcript(log_line)
 
     def _format_log_line(self, buffer: _UserBuffer, text: str) -> str:
@@ -254,17 +306,28 @@ class VoiceTranscriber:
     async def _append_transcript(self, line: str) -> None:
         if self._transcript_dir is None:
             return
-        path = self._transcript_dir / time.strftime("%Y-%m-%d") / "voice_transcripts.log"
+        path = (
+            self._transcript_dir / "guilds" / str(self._guild_id) / time.strftime("%Y-%m-%d") / "voice_transcripts.log"
+        )
         try:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            await asyncio.to_thread(self._append_line_sync, path, line)
+            await asyncio.to_thread(self._append_line_sync, path, line, self._ctx.privacy.generation)
         except Exception:
             _LOGGER.error("Failed to append transcript log to %s", path, exc_info=True)
 
-    @staticmethod
-    def _append_line_sync(path: Path, line: str) -> None:
-        with path.open("a", encoding="utf-8") as handle:
-            handle.write(line + "\n")
+    def _append_line_sync(self, path: Path, line: str, generation: int) -> None:
+        with self._ctx.guild_retention.transcript_lock:
+            if (
+                self._stopped
+                or self._ctx.privacy.generation != generation
+                or str(self._guild_id) in self._ctx.guild_retention.removed_guilds
+                or not channel_controls.is_allowed(
+                    self._ctx, str(self._channel_id), str(self._guild_id) if self._guild_id is not None else None
+                )
+            ):
+                return
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with path.open("a", encoding="utf-8") as handle:
+                handle.write(line + "\n")
 
 
 def _extract_pcm_bytes(data: object) -> bytes | None:
@@ -275,6 +338,101 @@ def _extract_pcm_bytes(data: object) -> bytes | None:
         if isinstance(raw, (bytes, bytearray)):
             return bytes(raw)
     return None
+
+
+def discard_user_audio(ctx: GlobalContext, user_id: str) -> None:
+    state = ctx.module_state.get("voice_transcriber")
+    if isinstance(state, VoiceTranscriberManager):
+        for transcriber in state._transcribers.values():
+            transcriber._buffers.pop(int(user_id), None)
+
+
+async def discard_guild_audio(ctx: GlobalContext, guild_id: str) -> None:
+    state = ctx.module_state.get("voice_transcriber")
+    if isinstance(state, VoiceTranscriberManager):
+        transcriber = state._transcribers.pop(int(guild_id), None)
+        if transcriber is not None:
+            transcriber._buffers.clear()
+            transcriber.stop()
+        watch = state._disconnect_tasks.pop(int(guild_id), None)
+        if watch is not None:
+            watch.cancel()
+    if ctx.discord_client is not None:
+        for voice_client in list(ctx.discord_client.voice_clients):
+            guild = getattr(voice_client.channel, "guild", None)
+            if guild is not None and str(guild.id) == guild_id:
+                await voice_client.disconnect(force=True)
+
+
+async def discard_channel_audio(ctx: GlobalContext, channel_id: str) -> None:
+    state = ctx.module_state.get("voice_transcriber")
+    if isinstance(state, VoiceTranscriberManager):
+        for guild_id, transcriber in list(state._transcribers.items()):
+            if str(transcriber._channel_id) == channel_id:
+                transcriber._buffers.clear()
+                transcriber.stop()
+                state._transcribers.pop(guild_id, None)
+                watch = state._disconnect_tasks.pop(guild_id, None)
+                if watch is not None:
+                    watch.cancel()
+    if ctx.discord_client is not None:
+        for voice_client in list(ctx.discord_client.voice_clients):
+            if str(getattr(voice_client.channel, "id", None)) == channel_id:
+                try:
+                    await voice_client.disconnect(force=True)
+                except Exception:
+                    _LOGGER.warning("Could not disconnect disabled voice channel %s", channel_id, exc_info=True)
+
+
+def purge_channel_transcripts(ctx: GlobalContext, channel_id: str) -> None:
+    if not channel_id.isdecimal():
+        raise ValueError("Expected a Discord channel identifier")
+    _purge_transcript_records(ctx, channel_id=channel_id)
+
+
+def purge_guild_transcripts(ctx: GlobalContext, guild_id: str) -> None:
+    """Delete partitioned transcripts and the guild's records in legacy mixed files."""
+    if not guild_id.isdecimal():
+        raise ValueError("Expected a Discord guild identifier")
+    _purge_transcript_records(ctx, guild_id=guild_id)
+
+
+def _purge_transcript_records(
+    ctx: GlobalContext, *, guild_id: str | None = None, channel_id: str | None = None
+) -> None:
+    directory = _resolve_transcript_dir(ctx)
+    if directory is None or not directory.exists():
+        return
+    with ctx.guild_retention.transcript_lock:
+        partition = directory / "guilds" / guild_id if guild_id else None
+        if partition is not None and partition.exists():
+            shutil.rmtree(partition)
+        for path in directory.rglob("voice_transcripts.log"):
+            lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
+            retained: list[str] = []
+            removed_record = False
+            for line in lines:
+                header = re.match(r"^Voice transcript guild=(\d+|unknown) channel=(\d+|unknown)\b", line)
+                if header:
+                    removed_record = (guild_id is not None and header.group(1) == guild_id) or (
+                        channel_id is not None and header.group(2) == channel_id
+                    )
+                if not removed_record:
+                    retained.append(line)
+            if retained == lines:
+                continue
+            if not retained:
+                path.unlink()
+                continue
+            fd, temporary = tempfile.mkstemp(prefix=".vox-transcripts-", dir=path.parent)
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                    handle.writelines(retained)
+                    handle.flush()
+                    os.fsync(handle.fileno())
+                os.replace(temporary, path)
+            finally:
+                Path(temporary).unlink(missing_ok=True)
 
 
 async def _maybe_await(result: object) -> None:
@@ -397,6 +555,9 @@ class VoiceTranscriberManager:
         if channel is None:
             _LOGGER.warning("Invite %s did not resolve to a channel.", invite.code)
             return
+
+        if not channel_controls.allows_channel(self._ctx, channel):
+            raise PermissionError("Vox processing is disabled in this voice channel. A moderator can re-enable it.")
 
         voice_recv = _load_voice_recv()
         if voice_recv is None:

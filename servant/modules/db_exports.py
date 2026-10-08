@@ -4,13 +4,13 @@ import asyncio
 import csv
 import datetime as dt
 import logging
-import sqlite3
 import tempfile
 import zipfile
 from pathlib import Path
 
 import discord
 
+from servant import database as sqlite3
 from servant import permissions
 from servant.defs import GlobalContext, ToolDef
 from servant.modules import commitment, topic_subscriptions

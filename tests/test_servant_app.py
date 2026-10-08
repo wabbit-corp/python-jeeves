@@ -136,6 +136,7 @@ def test_handle_incoming_message_uses_supplied_reasoning_effort(monkeypatch: pyt
     monkeypatch.setattr(servant_app, "reply", AsyncMock(return_value=None))
 
     ctx = GlobalContext()
+    ctx.channel_controls.loaded = True
     openai_client = AsyncOpenAI(api_key="test")
     create_mock = AsyncMock(
         return_value=SimpleNamespace(
