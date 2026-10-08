@@ -11,7 +11,7 @@ Privacy questions and requests: [wabbit@wabbit.one](mailto:wabbit@wabbit.one). P
 - **Discord messages and discussions:** message text, author and message IDs, names, timestamps, reply references, mentions, reactions, attachment metadata and links, and channel and server IDs. Vox processes channels it can access and direct messages sent to it. This can include accessible history and messages that do not mention Vox.
 - **Discord account and server information:** profile names and identifiers, channel details, server membership, roles, and permissions used to operate features and determine access. Depending on the Discord access enabled for the deployed bot, online status may also be supplied to the Discord client.
 - **Feature records:** reminder and commitment details, progress notes, topic subscriptions, notification history, and requested calendar or video-feed subscriptions.
-- **Voice, when enabled:** when a Discord voice-channel invite causes Vox to join a voice channel, Vox receives participants' audio and sends short audio segments to OpenAI for transcription. Audio is buffered in memory; Vox does not save raw audio recordings to disk. Transcribed text and participant, server, and channel identifiers can appear in service logs and configured transcript files. Participants should be told before Vox is invited into a voice channel.
+- **Voice, when enabled:** when a Discord voice-channel invite causes Vox to join a voice channel, Vox receives participants' audio and sends short audio segments to OpenAI for transcription. Audio is buffered in memory; Vox does not save raw audio recordings to disk. Transcribed text and participant, server, and channel identifiers can appear in conversation context and in-memory diagnostic logs. Persistent transcript files are disabled in the operator's service. Participants should be told before Vox is invited into a voice channel.
 - **Service and support records:** request activity, diagnostic logs that may contain message or response content, and information you send us when asking for help or exercising privacy rights.
 
 Server permissions limit which channels Vox can access. Vox stores a searchable message index and feature records on its host and keeps recent conversation context in memory.
@@ -45,7 +45,9 @@ Each feature sends the inputs needed to perform that feature to its provider. Pr
 
 ## Retention and deletion
 
-Vox does not apply a fixed expiry period to indexed messages, feature records, service logs, or operator-held recovery copies. We retain indexed discussions to support continuing conversation retrieval and contextual answers while Vox serves the community. Feature records support the reminders, commitments, and subscriptions members request. Older information can remain until we delete it. You can request deletion at any time; we also remove information when it no longer serves these operational purposes or when deletion is required by law or Discord.
+Vox does not apply a fixed expiry period to indexed messages, feature records, or operator-held recovery copies. We retain indexed discussions to support continuing conversation retrieval and contextual answers while Vox serves the community. Feature records support the reminders, commitments, and subscriptions members request. Older information can remain until we delete it. You can request deletion at any time; we also remove information when it no longer serves these operational purposes or when deletion is required by law or Discord.
+
+Current diagnostic logs use a bounded in-memory journal. Older entries are discarded as its space limit is reached, and a host restart clears it. Historical diagnostic logs retained for recovery are held in encrypted archives and remain subject to the deletion process below.
 
 Deleting a message in Discord does not by itself erase Vox's stored copy. The current index can mark messages as deleted while retaining their content. Restricting Vox's channel access stops future access to those spaces; moderators can use `/vox channel disable` to clear the channel's active archive.
 
@@ -79,7 +81,9 @@ Vox is hosted on a DigitalOcean server in New York, United States. The bot runs 
 
 The active message index and feature databases use SQLCipher 4 encryption, deployed on October 8, 2026. The database key is kept in a separate restricted file. Authorized administrators with access to the key can read the stored information.
 
-Restricted plaintext pre-migration databases and local recovery snapshots are currently retained for rollback. SQLCipher does not encrypt those older copies, existing service logs, transcript files, or exports. Those records remain subject to access restrictions and the deletion process described above. We will update this policy when the treatment of retained copies changes.
+Production plaintext pre-migration databases, retired data artifacts, and historical service-log files were removed after their recovery copies were verified. Retained production recovery archives use age encryption, with a separate restricted recovery-key file. Local recovery copies are held on the operator's FileVault-encrypted workstation with restricted file permissions.
+
+Current diagnostic logs and temporary administrative exports use bounded memory storage. The server's swap storage is encrypted with a fresh random key on each activation, protecting memory pages that reach disk. Persistent voice transcript files are disabled. These records and recovery copies remain subject to the deletion process described above.
 
 No service can guarantee absolute security. Report suspected unauthorized access to your Vox data privately using the contact above so we can investigate and take appropriate action.
 

@@ -35,6 +35,7 @@ The entries below are derived from the git history and grouped by release date.
 - Voice capture dependency for Discord voice receive plus PyNaCl runtime support.
 - External API connectivity checker script (`servant/scripts/check_external_apis.py`) with IPv4/IPv6 probes via aiohttp.
 ### Changed
+- Removed production plaintext databases, retired artifacts, and historical journal files after verifying all 93 files in a local recovery archive; retained server recovery archives and host swap are encrypted. Updated the public privacy policy to describe verified storage protections.
 - Runtime config loading now supports `JEEVES_CONFIG_PATH`, so deploys can point at `/etc/python-jeeves/private.yml` without relying on a working-directory config file.
 - Topic subscriptions now use `fastembed` with the ONNX `sentence-transformers/all-MiniLM-L6-v2` model path, while preserving the legacy `all-MiniLM-L6-v2` config alias.
 - Runtime dependency manifests now constrain `PyNaCl` to `<1.6` and pin the shared-host Discord voice stack in `requirements.runtime.txt`, matching what `discord.py[voice]` actually accepts for clean installs.
