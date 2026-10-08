@@ -1,10 +1,10 @@
 # Vox Privacy Policy
 
-Effective date: October 7, 2026
+Effective date: October 8, 2026
 
 Vox is a Discord bot operated by Wabbit Consulting Corporation. This policy covers the operator's Vox service, Discord application ID **1382045038501953729**. It explains what Vox processes, why, and how to contact us about your data. Independently operated copies of the open-source software have their own operators and policies.
 
-Privacy questions and requests: [vox@wabbit.one](mailto:vox@wabbit.one). You can also reach the operator at [wabbit@wabbit.one](mailto:wabbit@wabbit.one). Please contact us privately rather than posting personal information in a public GitHub issue.
+Privacy questions and requests: [wabbit@wabbit.one](mailto:wabbit@wabbit.one). Please contact us privately rather than posting personal information in a public GitHub issue.
 
 ## Information we process
 
@@ -15,6 +15,10 @@ Privacy questions and requests: [vox@wabbit.one](mailto:vox@wabbit.one). You can
 - **Service and support records:** request activity, diagnostic logs that may contain message or response content, and information you send us when asking for help or exercising privacy rights.
 
 Server permissions limit which channels Vox can access. Vox stores a searchable message index and feature records on its host and keeps recent conversation context in memory.
+
+Moderators can use `/vox channel disable` to privately confirm stopping processing and clearing a channel's active archive. A moderator with appropriate channel-management or message-moderation permission can resume processing with `/vox channel enable`. Channel settings persist across restarts, and changes are confirmed privately without a required public announcement. Existing and new channels and threads are enabled by default, subject to Discord permissions, unless a moderator disables processing in that channel. This covers accessible history and new messages, including messages that do not mention Vox. `/vox privacy` privately provides this policy, our contact, the opt-out command, and deletion instructions, including for people who have opted out. These controls were deployed on October 8, 2026.
+
+Search controls check the requester's current server membership and channel permissions. Retrieved messages remain within the channel and server where the request was made; a direct-message request can retrieve only that person's conversation with Vox. Private threads require membership or thread-management permission. Topic notifications check the recipient's current source-channel access before sending an excerpt.
 
 ## How we use information
 
@@ -43,13 +47,15 @@ Each feature sends the inputs needed to perform that feature to its provider. Pr
 
 Vox does not apply a fixed expiry period to indexed messages, feature records, service logs, or operator-held recovery copies. We retain indexed discussions to support continuing conversation retrieval and contextual answers while Vox serves the community. Feature records support the reminders, commitments, and subscriptions members request. Older information can remain until we delete it. You can request deletion at any time; we also remove information when it no longer serves these operational purposes or when deletion is required by law or Discord.
 
-Deleting a message in Discord does not by itself erase Vox's stored copy. The current index can mark messages as deleted while retaining their content. Removing Vox from a server or restricting its channel access stops future access to those spaces. At publication, existing records are not automatically deleted.
+Deleting a message in Discord does not by itself erase Vox's stored copy. The current index can mark messages as deleted while retaining their content. Restricting Vox's channel access stops future access to those spaces; moderators can use `/vox channel disable` to clear the channel's active archive.
 
-We have prepared automatic server-removal cleanup, which is awaiting deployment. Once deployed, removing Vox from a server will delete that server's active indexed messages and related metadata, conversation records, reminders, subscriptions, notification history, and configured voice transcripts. Vox will clear cached conversation context and stop pending processing. It will also check its installed servers after connecting and retry unfinished cleanup, including removals that occurred while it was offline. A temporary Discord outage will not trigger deletion. Personal records still needed in other servers or DMs will remain.
+Removing Vox from a server deletes that server's active indexed messages and related metadata, conversation records, reminders, subscriptions, notification history, and configured voice transcripts. Vox clears cached conversation context and stops pending processing. It also checks its installed servers after connecting and retries unfinished cleanup, including removals that occurred while it was offline. A temporary Discord outage does not trigger deletion. Personal records still needed in other servers or DMs remain.
 
 Minimal server and channel identifiers will remain to enforce removal and prevent delayed work from restoring records; they contain no discussion, transcript, reminder, or subscription content. Global opt-out identifiers also remain. Reinstalling Vox starts collection afresh. Historical service logs, exports, recovery copies, and provider-held copies require separate operator cleanup; server removal alone will not erase those copies. Contact the privacy address about their deletion.
 
-To request access, correction, deletion, or restriction of processing, email [vox@wabbit.one](mailto:vox@wabbit.one) with your Discord user ID and the scope of your request. We may ask for enough information to verify that the account is yours. Do not send your Discord password, access token, or unnecessary sensitive information.
+The `/vox channel disable` command gives moderators a private confirmation to stop processing and clear that channel's active indexed messages and metadata, conversation records, reminders, subscriptions, notification history, and configured voice transcripts. Vox clears cached context, cancels pending processing, prevents delayed writes from restoring records, and retries unfinished cleanup after reconnecting. Other channels and personal opt-out preferences remain. Minimal channel-control identifiers remain to keep processing disabled. A moderator can later resume collection, including accessible history, using `/vox channel enable`. Historical logs, exports, recovery copies, and provider copies require separate operator cleanup.
+
+To request access, correction, deletion, or restriction of processing, email [wabbit@wabbit.one](mailto:wabbit@wabbit.one) with your Discord user ID and the scope of your request. We may ask for enough information to verify that the account is yours. Do not send your Discord password, access token, or unnecessary sensitive information.
 
 We handle requests promptly and respond within one month of receipt. If applicable law permits extra time for a complex request, we explain the reason and expected response date within that first month. For a verified deletion request, we remove the personal data we hold or control from active databases, feature records, logs, transcript files, and recovery copies, retaining only the minimal opt-out identifiers described below. We also notify relevant providers of the request and seek deletion of copies they process for Vox where applicable. We explain any lawful retention or provider limitations in our response.
 
@@ -59,24 +65,24 @@ Depending on the law that applies to you, you may also have rights to receive a 
 
 ## Opting out
 
-You can contact the privacy address to request deletion or raise a processing concern. The automated opt-out command described below is awaiting deployment.
+You can contact the privacy address to request deletion or raise a processing concern, or use the automated opt-out command below.
 
-We are preparing **`/vox optout`**. At this policy's publication date, it has not yet been deployed. Once available, it will open a private confirmation visible only to the person invoking it. Confirming will stop processing that person's authored messages and voice across servers and DMs, remove their messages from the active index, stop their reminders and topic subscriptions, and disable all their Vox features. The preference will persist across restarts, with no user command to undo it.
+**`/vox optout`** opens a private confirmation visible only to the person invoking it. Confirming stops processing that person's authored messages and voice across servers and DMs, removes their messages from the active index, stops their reminders and topic subscriptions, and disables all their Vox features. The preference persists across restarts, with no user command to undo it.
 
-The command will retain minimal Discord user and message identifiers to enforce the preference and prevent withdrawn messages from being restored by history indexing or partial edits. We retain those minimal identifiers after a deletion request so Vox can continue honoring the opt-out across restarts. They contain no message text, voice audio, reminder details, or subscription content.
+The command retains minimal Discord user and message identifiers to enforce the preference and prevent withdrawn messages from being restored by history indexing or partial edits. We retain those minimal identifiers after a deletion request so Vox can continue honoring the opt-out across restarts. They contain no message text, voice audio, reminder details, or subscription content.
 
-The command alone will not erase historical logs, backups, information other people include in their own messages, or copies already sent to providers. Email the privacy contact to request deletion of the personal data we hold or control in those records.
+The command alone does not erase historical logs, backups, information other people include in their own messages, or copies already sent to providers. Email the privacy contact to request deletion of the personal data we hold or control in those records.
 
 ## Security
 
 Vox is hosted on a DigitalOcean server in New York, United States. The bot runs under a dedicated service account. Its data directories and database files use restricted filesystem permissions, and its runtime credentials are stored in a separate restricted configuration file. Administrative access uses SSH keys; password-based and direct root SSH login are disabled. Host and cloud firewalls restrict inbound access. Connections to Discord, OpenAI, and the HTTPS provider endpoints use encrypted transport.
 
-At publication, the local databases use access controls but are not encrypted by the application or the host filesystem. Authorized administrators can read the stored information.
+The active message index and feature databases use SQLCipher 4 encryption, deployed on October 8, 2026. The database key is kept in a separate restricted file. Authorized administrators with access to the key can read the stored information.
 
-We have prepared a switch to SQLCipher encryption for the bot's databases, but it has not yet been deployed. This preparation does not encrypt the live databases, existing logs, transcript files, or older copies. We will update this policy when the deployed safeguards change.
+Restricted plaintext pre-migration databases and local recovery snapshots are currently retained for rollback. SQLCipher does not encrypt those older copies, existing service logs, transcript files, or exports. Those records remain subject to access restrictions and the deletion process described above. We will update this policy when the treatment of retained copies changes.
 
 No service can guarantee absolute security. Report suspected unauthorized access to your Vox data privately using the contact above so we can investigate and take appropriate action.
 
 ## Changes and contact
 
-We will publish updates at this policy's GitHub location and change the effective date when the policy changes. Contact [vox@wabbit.one](mailto:vox@wabbit.one) with privacy questions, requests, or concerns about Vox.
+We will publish updates at this policy's GitHub location and change the effective date when the policy changes. Contact [wabbit@wabbit.one](mailto:wabbit@wabbit.one) with privacy questions, requests, or concerns about Vox.
