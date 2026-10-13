@@ -7,6 +7,7 @@ The entries below are derived from the git history and grouped by release date.
 ## [Unreleased]
 ### Added
 
+- Public Vox Terms of Service in `TERMS.md`, covering acceptable use, privacy controls, service availability, and support contact details.
 - `/vox privacy` provides private access to the policy, privacy contact, opt-out command, and deletion instructions. Moderator-only `/vox channel enable`, `status`, and privately confirmed `disable` provide durable stop-and-clear cleanup and restart recovery. Existing and new channels and threads are enabled by default subject to Discord permissions; moderators' disable choices persist, and channel controls reply privately without public announcements.
 - Message retrieval now verifies current Discord membership and channel permissions and stays within the request's channel and server, including for configured global administrators. Private threads require membership or thread-management permission; topic DMs recheck the recipient's current access.
 - Server-removal cleanup across Vox's active databases, cached context, and voice transcripts, with offline reconciliation, persistent retry markers, and protection against delayed worker writes. Other servers, DMs, and global opt-outs are preserved; reminders now record their owning server.

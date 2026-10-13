@@ -1,5 +1,6 @@
 # Jeeves
 
+Read the [Vox Terms of Service](TERMS.md) for service rules and conditions.
 Read the [Vox Privacy Policy](PRIVACY.md) for data processing details and privacy requests.
 Contact [wabbit@wabbit.one](mailto:wabbit@wabbit.one) with privacy questions or deletion requests.
 
