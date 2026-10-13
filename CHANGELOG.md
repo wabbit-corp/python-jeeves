@@ -46,7 +46,7 @@ The entries below are derived from the git history and grouped by release date.
 - Runtime config loading now supports `JEEVES_CONFIG_PATH`, so deploys can point at `/etc/python-jeeves/private.yml` without relying on a working-directory config file.
 - Topic subscriptions now use `fastembed` with the ONNX `sentence-transformers/all-MiniLM-L6-v2` model path, while preserving the legacy `all-MiniLM-L6-v2` config alias.
 - Runtime dependency manifests now constrain `PyNaCl` to `<1.6` and pin the shared-host Discord voice stack in `requirements.runtime.txt`, matching what `discord.py[voice]` actually accepts for clean installs.
-- Discord reply instructions now let Jeeves vary answer length based on the conversation's casualness and information needs.
+- Vox now defaults to at most two short paragraphs and 120 words, with longer replies only on explicit request. Low API verbosity reinforces this default, and reply instructions discourage routine tool narration and unsolicited breakdowns.
 - QA tooling now emits structured output, supports quiet/parallel runs, and improves coverage/error summaries.
 - URL fetch now uses a dedicated browser-like user agent override instead of inheriting the global `web.user-agent`.
 - JSON parsing and type checking tightened across Servant (import cycles now errors).
