@@ -308,3 +308,118 @@ def test_poll_subscription_ics_posts_soonest_event(tmp_path: Path, monkeypatch: 
         assert sent and "Soon" in sent[0]
     finally:
         conn.close()
+
+
+@pytest.mark.parametrize("failure", ["http", "invalid_feed"])
+def test_poll_failures_are_visible_backed_off_and_recover(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str
+) -> None:
+    ctx = _ctx_with_db(tmp_path)
+    asyncio.run(
+        event_channels.event_channel_subscription_manage(
+            ctx, {"operation": "create", "channel_id": "1001", "kind": "youtube", "source": "UC1234567890abcdef_-ABC"}
+        )
+    )
+    monkeypatch.setattr(event_channels, "_now_ms", lambda: 1_000_000)
+
+    async def fail_fetch(ctx: GlobalContext, url: str) -> str:
+        if failure == "http":
+            raise event_channels.FeedFetchError("Feed request failed (HTTP 404).")
+        return "<html>temporarily unavailable</html>"
+
+    monkeypatch.setattr(event_channels, "_fetch_text", fail_fetch)
+    result = asyncio.run(event_channels.event_channels_poll_routine(ctx, {}))
+    assert result == {"ok": False, "checked": 1, "posted": 0, "failed": 1}
+    conn = event_channels._connect(event_channels._db_path(ctx))
+    try:
+        sub = event_channels._row_to_subscription(conn.execute("SELECT * FROM event_channel_subscriptions").fetchone())
+        assert sub.last_checked_at == 0  # A failed first poll must still seed on recovery.
+        assert sub.consecutive_failures == 1
+        assert sub.last_error
+        assert sub.next_retry_at == 1_060_000
+    finally:
+        conn.close()
+    assert asyncio.run(event_channels.event_channels_poll_routine(ctx, {}))["checked"] == 0
+
+    async def success_fetch(ctx: GlobalContext, url: str) -> str:
+        return """<feed xmlns="http://www.w3.org/2005/Atom">
+          <entry xmlns:yt="http://www.youtube.com/xml/schemas/2015">
+            <yt:videoId>video1</yt:videoId><title>Video</title>
+            <published>2024-01-01T00:00:00Z</published>
+          </entry>
+        </feed>"""
+
+    monkeypatch.setattr(event_channels, "_now_ms", lambda: sub.next_retry_at)
+    monkeypatch.setattr(event_channels, "_fetch_text", success_fetch)
+    recovered = asyncio.run(event_channels.event_channels_poll_routine(ctx, {}))
+    assert recovered == {"ok": True, "checked": 1, "posted": 0, "failed": 0}
+    conn = event_channels._connect(event_channels._db_path(ctx))
+    try:
+        row = conn.execute("SELECT * FROM event_channel_subscriptions").fetchone()
+        assert row["last_checked_at"] == sub.next_retry_at
+        assert row["consecutive_failures"] == 0
+        assert row["last_error"] is None
+        assert row["next_retry_at"] == 0
+        assert conn.execute("SELECT count(*) FROM event_channel_seen_items").fetchone()[0] == 1
+    finally:
+        conn.close()
+
+
+def test_fetch_retries_intermittent_http_errors(monkeypatch: pytest.MonkeyPatch) -> None:
+    from unittest.mock import AsyncMock, MagicMock
+
+    import aiohttp
+
+    error = aiohttp.ClientResponseError(MagicMock(), (), status=404)
+    response = MagicMock()
+    response.raise_for_status.side_effect = [error, error, None]
+    response.text = AsyncMock(return_value="feed body")
+    request = MagicMock()
+    request.__aenter__ = AsyncMock(return_value=response)
+    session = MagicMock()
+    session.get.return_value = request
+    context = MagicMock()
+    context.__aenter__ = AsyncMock(return_value=session)
+    monkeypatch.setattr(aiohttp, "ClientSession", MagicMock(return_value=context))
+    sleep = AsyncMock()
+    monkeypatch.setattr(asyncio, "sleep", sleep)
+    assert (
+        asyncio.run(event_channels._fetch_text(GlobalContext(), "https://www.youtube.com/feeds/videos.xml"))
+        == "feed body"
+    )
+    assert session.get.call_count == 3
+    assert [call.args for call in sleep.await_args_list] == [(1.0,), (2.0,)]
+
+
+@pytest.mark.parametrize(("status", "retry_after", "attempts"), [(401, "0", 1), (404, "0", 3), (429, "120", 1)])
+def test_feed_retry_is_bounded_and_redacts_source(
+    monkeypatch: pytest.MonkeyPatch, status: int, retry_after: str, attempts: int
+) -> None:
+    from unittest.mock import AsyncMock, MagicMock
+
+    import aiohttp
+    from multidict import CIMultiDict
+
+    private_url = "https://example.org/private-calendar?token=secret"
+    request_info = MagicMock()
+    request_info.real_url = private_url
+    error = aiohttp.ClientResponseError(
+        request_info, (), status=status, headers=CIMultiDict({"Retry-After": retry_after})
+    )
+    response = MagicMock()
+    response.raise_for_status.side_effect = error
+    request = MagicMock()
+    request.__aenter__ = AsyncMock(return_value=response)
+    session = MagicMock()
+    session.get.return_value = request
+    context = MagicMock()
+    context.__aenter__ = AsyncMock(return_value=session)
+    monkeypatch.setattr(aiohttp, "ClientSession", MagicMock(return_value=context))
+    monkeypatch.setattr(asyncio, "sleep", AsyncMock())
+    with pytest.raises(event_channels.FeedFetchError) as caught:
+        asyncio.run(event_channels._fetch_text(GlobalContext(), private_url))
+    assert private_url not in str(caught.value)
+    assert "secret" not in str(caught.value)
+    assert session.get.call_count == attempts
+    if status == 429:
+        assert caught.value.retry_after == 120

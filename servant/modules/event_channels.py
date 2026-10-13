@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import logging
+import math
 import re
 import time
 from dataclasses import dataclass
@@ -45,6 +47,9 @@ DEFAULT_MAX_POSTS_PER_RUN = 3
 DEFAULT_LOOKAHEAD_DAYS = 30
 DEFAULT_MAX_SUBSCRIPTIONS_PER_TICK = 10
 DEFAULT_HTTP_TIMEOUT_SECONDS = 20
+FEED_FETCH_ATTEMPTS = 3
+FEED_RETRY_BASE_SECONDS = 60
+FEED_RETRY_MAX_SECONDS = 15 * 60
 INITIAL_ICS_LOOKBACK_DAYS = 7
 INITIAL_ICS_LOOKAHEAD_DAYS = 7
 DEFAULT_ICS_LOOKBACK_DAYS = 1
@@ -127,6 +132,15 @@ def _init_db(conn: sqlite3.Connection) -> None:
         "CREATE INDEX IF NOT EXISTS idx_event_channel_seen_items_ts "
         "ON event_channel_seen_items(subscription_id, item_ts);"
     )
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(event_channel_subscriptions)")}
+    for name, definition in (
+        ("consecutive_failures", "INTEGER NOT NULL DEFAULT 0"),
+        ("last_attempt_at", "INTEGER NOT NULL DEFAULT 0"),
+        ("next_retry_at", "INTEGER NOT NULL DEFAULT 0"),
+        ("last_error", "TEXT"),
+    ):
+        if name not in columns:
+            conn.execute(f"ALTER TABLE event_channel_subscriptions ADD COLUMN {name} {definition}")
     from servant import storage_schema
 
     storage_schema.init_retention_schema(conn)
@@ -199,6 +213,10 @@ class EventChannelSubscription:
     created_at: int
     updated_at: int
     last_checked_at: int
+    consecutive_failures: int = 0
+    last_attempt_at: int = 0
+    next_retry_at: int = 0
+    last_error: str | None = None
 
 
 def _row_to_subscription(r: sqlite3.Row) -> EventChannelSubscription:
@@ -216,6 +234,10 @@ def _row_to_subscription(r: sqlite3.Row) -> EventChannelSubscription:
         created_at=int(r["created_at"]),
         updated_at=int(r["updated_at"]),
         last_checked_at=int(r["last_checked_at"]),
+        consecutive_failures=int(r["consecutive_failures"]),
+        last_attempt_at=int(r["last_attempt_at"]),
+        next_retry_at=int(r["next_retry_at"]),
+        last_error=r["last_error"],
     )
 
 
@@ -234,6 +256,10 @@ def _subscription_payload(s: EventChannelSubscription) -> JSONDict:
         "created_at": s.created_at,
         "updated_at": s.updated_at,
         "last_checked_at": s.last_checked_at,
+        "consecutive_failures": s.consecutive_failures,
+        "last_attempt_at": s.last_attempt_at,
+        "next_retry_at": s.next_retry_at,
+        "last_error": s.last_error,
     }
 
 
@@ -746,13 +772,42 @@ def _parse_youtube_feed(text: str) -> list[_FeedItem]:
     return items
 
 
+class FeedFetchError(RuntimeError):
+    def __init__(self, message: str, retry_after: float = 0) -> None:
+        self.retry_after = retry_after
+        super().__init__(message)
+
+
 async def _fetch_text(ctx: GlobalContext, url: str) -> str:
     headers = {"User-Agent": _get_user_agent(ctx)}
     timeout = aiohttp.ClientTimeout(total=DEFAULT_HTTP_TIMEOUT_SECONDS)
     async with aiohttp.ClientSession(timeout=timeout, headers=headers) as session:
-        async with session.get(url, allow_redirects=True) as resp:
-            resp.raise_for_status()
-            return await resp.text()
+        for attempt in range(FEED_FETCH_ATTEMPTS):
+            retry_after = float(2**attempt)
+            try:
+                async with session.get(url, allow_redirects=True) as resp:
+                    resp.raise_for_status()
+                    return await resp.text()
+            except aiohttp.ClientResponseError as error:
+                if error.headers:
+                    try:
+                        hint = float(error.headers.get("Retry-After", "0"))
+                    except ValueError:
+                        hint = 0.0
+                    if math.isfinite(hint):
+                        retry_after = max(retry_after, hint)
+                if (
+                    error.status not in {404, 408, 425, 429}
+                    and error.status < 500
+                    or attempt == FEED_FETCH_ATTEMPTS - 1
+                    or retry_after > 5
+                ):
+                    raise FeedFetchError(f"Feed request failed (HTTP {error.status}).", retry_after) from None
+            except (aiohttp.ClientError, TimeoutError) as error:
+                if attempt == FEED_FETCH_ATTEMPTS - 1:
+                    raise FeedFetchError(f"Feed request failed ({type(error).__name__}).") from None
+            await asyncio.sleep(retry_after)
+    raise AssertionError("Feed retry loop must return or raise.")
 
 
 def _load_seen_ids(conn: sqlite3.Connection, subscription_id: int, item_ids: list[str]) -> set[str]:
@@ -819,11 +874,10 @@ async def _poll_subscription(
         return (0, 0)
 
     _LOGGER.info(
-        "Polling event-channel subscription id=%s kind=%s channel=%s source=%s",
+        "Polling event-channel subscription id=%s kind=%s channel=%s",
         sub.id,
         sub.kind,
         sub.channel_id,
-        sub.source,
     )
 
     if sub.kind == "ics":
@@ -833,11 +887,9 @@ async def _poll_subscription(
         if is_first_run:
             lookback_days = INITIAL_ICS_LOOKBACK_DAYS
             lookahead_days = INITIAL_ICS_LOOKAHEAD_DAYS
-        try:
-            body = await _fetch_text(ctx, sub.source)
-        except Exception:
-            _LOGGER.warning("Failed to fetch ICS source for subscription %s", sub.id, exc_info=True)
-            return (0, 0)
+        body = await _fetch_text(ctx, sub.source)
+        if "BEGIN:VCALENDAR" not in body.upper() or "END:VCALENDAR" not in body.upper():
+            raise ValueError("Calendar source returned an invalid ICS document.")
         items = _parse_ics_events(
             body,
             now_utc=datetime.now(tz=timezone.utc),
@@ -852,23 +904,16 @@ async def _poll_subscription(
             lookahead_days,
         )
     elif sub.kind == "youtube":
+        body = await _fetch_text(ctx, sub.source)
         try:
-            body = await _fetch_text(ctx, sub.source)
-        except Exception:
-            _LOGGER.warning("Failed to fetch YouTube source for subscription %s", sub.id, exc_info=True)
-            return (0, 0)
+            root = ET.fromstring(body)
+        except ET.ParseError:
+            raise ValueError("YouTube source returned an invalid Atom feed.") from None
+        if root.tag != "{http://www.w3.org/2005/Atom}feed":
+            raise ValueError("YouTube source returned an invalid Atom feed.")
         items = _parse_youtube_feed(body)
         if not items:
-            feed_like = "<feed" in body and "youtube.com/xml/schemas/2015" in body
-            if feed_like:
-                _LOGGER.info("YouTube subscription id=%s feed has no entries.", sub.id)
-            else:
-                _LOGGER.warning(
-                    "YouTube subscription id=%s source does not look like an Atom feed. source=%s preview=%r",
-                    sub.id,
-                    sub.source,
-                    _preview_text(body),
-                )
+            _LOGGER.info("YouTube subscription id=%s feed has no entries.", sub.id)
         else:
             latest_item = items[-1]
             _LOGGER.info(
@@ -879,8 +924,7 @@ async def _poll_subscription(
                 datetime.fromtimestamp(latest_item.item_ts_ms / 1000, tz=timezone.utc).isoformat(),
             )
     else:
-        _LOGGER.error("Unknown subscription kind=%s for id=%s", sub.kind, sub.id)
-        return (0, 0)
+        raise ValueError(f"Unknown subscription kind: {sub.kind}")
 
     if not items:
         _LOGGER.info("No candidate items to post for subscription id=%s", sub.id)
@@ -1014,11 +1058,12 @@ async def event_channels_poll_routine(ctx: GlobalContext, _obj: JSON) -> JSONDic
             FROM event_channel_subscriptions
             WHERE status = 'active'
               AND NOT EXISTS(SELECT 1 FROM privacy_channel_controls p WHERE p.channel_id=event_channel_subscriptions.channel_id AND (p.allowed=0 OR p.pending=1))
-              AND (last_checked_at = 0 OR (? - last_checked_at) >= (check_every_seconds * 1000))
+              AND ((next_retry_at > 0 AND next_retry_at <= ?)
+                   OR (next_retry_at = 0 AND (last_checked_at = 0 OR (? - last_checked_at) >= (check_every_seconds * 1000))))
             ORDER BY last_checked_at ASC, id ASC
             LIMIT ?
             """,
-            (now_ms, max_per_tick),
+            (now_ms, now_ms, max_per_tick),
         ).fetchall()
 
         subs = [_row_to_subscription(r) for r in rows]
@@ -1030,6 +1075,7 @@ async def event_channels_poll_routine(ctx: GlobalContext, _obj: JSON) -> JSONDic
 
         checked = 0
         posted = 0
+        failed = 0
         for sub in subs:
             checked += 1
             try:
@@ -1042,15 +1088,32 @@ async def event_channels_poll_routine(ctx: GlobalContext, _obj: JSON) -> JSONDic
                     _seen,
                     _posted,
                 )
-            finally:
+            except Exception as error:
+                failed += 1
+                failures = sub.consecutive_failures + 1
+                delay = min(FEED_RETRY_MAX_SECONDS, FEED_RETRY_BASE_SECONDS * 2 ** min(failures - 1, 5))
+                if isinstance(error, FeedFetchError):
+                    delay = max(delay, math.ceil(error.retry_after))
+                # Store a useful status without private calendar URLs or response bodies.
+                detail = str(error) if isinstance(error, (FeedFetchError, ValueError)) else type(error).__name__
                 conn.execute(
-                    "UPDATE event_channel_subscriptions SET last_checked_at = ?, updated_at = ? WHERE id = ?",
-                    (now_ms, now_ms, sub.id),
+                    """UPDATE event_channel_subscriptions
+                       SET last_attempt_at = ?, updated_at = ?, consecutive_failures = ?,
+                           next_retry_at = ?, last_error = ? WHERE id = ?""",
+                    (now_ms, now_ms, failures, now_ms + delay * 1000, detail[:300], sub.id),
                 )
-                conn.commit()
+                _LOGGER.warning("Event subscription %s failed: %s; retry in %ss", sub.id, detail, delay)
+            else:
+                conn.execute(
+                    """UPDATE event_channel_subscriptions
+                       SET last_checked_at = ?, last_attempt_at = ?, updated_at = ?,
+                           consecutive_failures = 0, next_retry_at = 0, last_error = NULL WHERE id = ?""",
+                    (now_ms, now_ms, now_ms, sub.id),
+                )
+            conn.commit()
 
-        _LOGGER.info("Event-channel polling tick complete checked=%s posted=%s", checked, posted)
-        return {"ok": True, "checked": checked, "posted": posted}
+        _LOGGER.info("Event-channel polling tick complete checked=%s posted=%s failed=%s", checked, posted, failed)
+        return {"ok": failed == 0, "checked": checked, "posted": posted, "failed": failed}
     finally:
         conn.close()
 

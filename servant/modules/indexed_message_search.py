@@ -46,10 +46,11 @@ def _normalize_query(value: object | None) -> str:
     return str(value).strip() if value is not None else ""
 
 
-def _ms_to_iso(value: int | None) -> str | None:
-    if value is None:
+def _ms_to_iso(value: object | None) -> str | None:
+    milliseconds = _parse_timestamp(value, "indexed timestamp")
+    if milliseconds is None:
         return None
-    ts = dt.datetime.fromtimestamp(value / 1000.0, tz=dt.timezone.utc)
+    ts = dt.datetime.fromtimestamp(milliseconds / 1000.0, tz=dt.timezone.utc)
     return ts.replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 

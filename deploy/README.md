@@ -56,6 +56,13 @@ cd /opt/python-jeeves/current
 ./deploy/install-runtime.sh
 ```
 
+The installer also provisions Playwright's matching Chromium artifacts and verifies
+a real browser launch. On Linux, run it with root privileges after creating the
+`python-jeeves` service account so it can install native browser libraries and
+download Chromium into `/var/cache/python-jeeves` as that account. For an existing
+runtime, `sudo ./deploy/install-browser.sh` repairs just the browser installation.
+Keep its cache path consistent with `XDG_CACHE_HOME` in the service unit.
+
 5. Install the `systemd` unit and enable it only when ready.
 
 Install `journald@vox.conf` as `/etc/systemd/journald@vox.conf` before starting
@@ -66,6 +73,8 @@ administrative exports and other temporary files. `PrivateTmp=no` is intentional
 `PrivateTmp=yes` can place disk-backed bind mounts over the tmpfs mounts. Verify
 the running process's mount information after deployment. Persistent voice
 transcripts are disabled in the production configuration.
+Both tmpfs mounts need `mode=1777` so the service account can create browser and
+other temporary files; the sticky bit protects other users' files.
 
 ## Runtime Requirements
 

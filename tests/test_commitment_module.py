@@ -3,6 +3,7 @@ import asyncio
 import datetime as dt
 import threading
 import time
+from collections.abc import AsyncIterator
 from pathlib import Path
 
 import discord
@@ -756,3 +757,132 @@ def test_commitment_notes_append_waits_for_locked_db(
 
     updated_commitment = require_obj(result_holder[0]["commitment"])
     assert updated_commitment["notes"] == "Completed for 2026-01-29 and 2026-01-30."
+
+
+def test_checkin_releases_write_lock_before_callback(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    ctx = _ctx_with_db(tmp_path)
+    today = dt.date.today().isoformat()
+    created = asyncio.run(
+        commitment.commitment_manage(
+            ctx,
+            {
+                "operation": "create",
+                "name": "Progress",
+                "description": "Original",
+                "user_id": ctx.request.user_id if ctx.request else "",
+                "channel_id": ctx.request.channel_id if ctx.request else "",
+                "start_date": today,
+                "end_date": today,
+            },
+        )
+    )
+    item = require_obj(created["commitment"])
+    monkeypatch.setattr(commitment, "DEFAULT_SQLITE_BUSY_TIMEOUT_MS", 50)
+
+    async def update_during_reply(channel_id: str, system_message: str, user_message: str) -> None:
+        result = await commitment.commitment_manage(
+            ctx,
+            {
+                "operation": "update",
+                "commitment_id": item["id"],
+                "description": "Updated in callback",
+            },
+        )
+        assert result["ok"] is True
+
+    ctx.request_vox_reply = update_during_reply
+    result = asyncio.run(commitment.commitment_checkin_task(ctx, {}))
+    assert result["channels_failed"] == 0
+    assert result["commitments_pinged"] == 1
+    conn = sqlite3.connect(Path(str(ctx.config["commitments_db_path"])))
+    try:
+        row = conn.execute("SELECT description, last_checkin_date FROM commitments").fetchone()
+        assert tuple(row) == ("Updated in callback", today)
+    finally:
+        conn.close()
+
+
+@pytest.mark.parametrize("failure", ["api", "empty", "length", "discord"])
+def test_failed_generated_reminder_is_not_marked_delivered(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str
+) -> None:
+    from contextlib import asynccontextmanager
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, MagicMock
+
+    import httpx
+    import openai
+    from openai import AsyncOpenAI
+
+    import servant_app
+
+    @asynccontextmanager
+    async def no_typing(*args: object) -> AsyncIterator[None]:
+        yield
+
+    monkeypatch.setattr(servant_app, "TypingIndicator", no_typing)
+    ctx = _ctx_with_db(tmp_path, user_id="42", channel_id="10")
+    today = dt.date.today().isoformat()
+    asyncio.run(
+        commitment.commitment_manage(
+            ctx,
+            {
+                "operation": "create",
+                "name": "Progress",
+                "description": "Original",
+                "user_id": ctx.request.user_id if ctx.request else "",
+                "channel_id": ctx.request.channel_id if ctx.request else "",
+                "start_date": today,
+                "end_date": today,
+            },
+        )
+    )
+    channel = MagicMock(spec=discord.DMChannel)
+    channel.id = 10
+    channel.send = AsyncMock(side_effect=RuntimeError("send failed") if failure == "discord" else None)
+    author = MagicMock(spec=discord.ClientUser)
+    author.id = 1
+    author.name = "Vox"
+    message = servant_app._SyntheticMessage(channel=channel, author=author, message_id=1, content="Send reminder")
+    provider = AsyncOpenAI(api_key="test")
+    create = AsyncMock(
+        return_value=SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    finish_reason="length" if failure == "length" else "stop",
+                    message=SimpleNamespace(content="" if failure == "empty" else "Reminder", tool_calls=None),
+                )
+            ]
+        )
+    )
+    if failure == "api":
+        create.side_effect = openai.APIConnectionError(
+            request=httpx.Request("POST", "https://api.openai.com/v1/chat/completions")
+        )
+    monkeypatch.setattr(provider.chat.completions, "create", create)
+    client = MagicMock(spec=discord.Client)
+
+    async def generate(channel_id: str, system_message: str, user_message: str) -> None:
+        await servant_app.handle_incoming_message(ctx, client, message, provider)
+
+    ctx.request_vox_reply = generate
+    try:
+        result = asyncio.run(commitment.commitment_checkin_task(ctx, {}))
+        assert result == {"ok": False, "channels_pinged": 0, "commitments_pinged": 0, "channels_failed": 1}
+        conn = sqlite3.connect(Path(str(ctx.config["commitments_db_path"])))
+        try:
+            assert conn.execute("SELECT last_checkin_date FROM commitments").fetchone()[0] is None
+        finally:
+            conn.close()
+        # Recovery must deliver and then advance the schedule.
+        create.side_effect = None
+        create.return_value = SimpleNamespace(
+            choices=[
+                SimpleNamespace(finish_reason="stop", message=SimpleNamespace(content="Reminder", tool_calls=None))
+            ]
+        )
+        channel.send.side_effect = None
+        recovered = asyncio.run(commitment.commitment_checkin_task(ctx, {}))
+        assert recovered["commitments_pinged"] == 1
+    finally:
+        asyncio.run(provider.close())

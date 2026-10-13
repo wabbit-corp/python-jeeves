@@ -327,6 +327,7 @@ class Commitment:
     interval_days: int
     last_checkin_date: str | None
     status: str
+    guild_id: str | None = None
 
 
 def _commitment_payload(commitment: Commitment) -> JSONDict:
@@ -397,6 +398,7 @@ def _row_to_commitment(r: sqlite3.Row) -> Commitment:
             _WARNED_MISSING_COMMITMENT_COLUMNS.update(new_missing)
 
     return Commitment(
+        guild_id=str(r["guild_id"]) if "guild_id" in keys and r["guild_id"] is not None else None,
         id=int(r["id"]),
         name=str(r["name"]),
         description=str(r["description"]),
@@ -873,8 +875,7 @@ async def commitment_checkin_task(ctx: GlobalContext, _obj: JSON) -> JSONDict:
     dbfile = _db_path(ctx)
     _LOGGER.debug("commitment_checkin_task starting (db=%s)", dbfile)
 
-    async def _work(conn: sqlite3.Connection) -> JSONDict:
-        # 1) End commitments past end_date
+    def _load_due(conn: sqlite3.Connection) -> tuple[int, dict[str, list[Commitment]]]:
         conn.execute(
             """
             UPDATE commitments
@@ -883,8 +884,6 @@ async def commitment_checkin_task(ctx: GlobalContext, _obj: JSON) -> JSONDict:
             """,
             (now, today_s),
         )
-
-        # 2) Fetch active commitments
         rows = conn.execute(
             """
             SELECT * FROM commitments
@@ -893,11 +892,9 @@ async def commitment_checkin_task(ctx: GlobalContext, _obj: JSON) -> JSONDict:
             """,
             (today_s, today_s),
         ).fetchall()
-
-        # print(f"Found {len(rows)} active commitments.")
+        conn.commit()
 
         due_by_channel: dict[str, list[Commitment]] = {}
-
         for r in rows:
             if ctx.privacy.is_opted_out(str(r["user_id"])):
                 continue
@@ -908,102 +905,98 @@ async def commitment_checkin_task(ctx: GlobalContext, _obj: JSON) -> JSONDict:
             try:
                 c = _row_to_commitment(r)
             except Exception:
-                _LOGGER.error(
-                    "Failed to parse commitment row; skipping.",
-                    exc_info=True,
-                )
+                _LOGGER.error("Failed to parse commitment row; skipping.", exc_info=True)
                 continue
             if _should_checkin(today, c.last_checkin_date, c.interval_days):
                 due_by_channel.setdefault(c.channel_id, []).append(c)
+        return len(rows), due_by_channel
 
-        # 3) Send one message per channel
-        due_ids: list[int] = []
-        channels_pinged = 0
-        channels_failed = 0
-        for channel_id, commitments in due_by_channel.items():
-            if ctx.privacy.generation != privacy_generation:
-                break
-            commitments = [c for c in commitments if not ctx.privacy.is_opted_out(c.user_id)]
-            if not commitments:
-                continue
-            # Group by user
-            by_user: dict[str, list[Commitment]] = {}
-            for c in commitments:
-                by_user.setdefault(c.user_id, []).append(c)
+    # Model replies can call commitment tools. Close this connection before any
+    # network work so those tools can acquire their own write transactions.
+    active_count, due_by_channel = await _with_db(ctx, _load_due)
+    channels_pinged = 0
+    commitments_pinged = 0
+    channels_failed = 0
+    for channel_id, commitments in due_by_channel.items():
+        if ctx.privacy.generation != privacy_generation:
+            break
+        commitments = [
+            c
+            for c in commitments
+            if not ctx.privacy.is_opted_out(c.user_id) and channel_controls.is_allowed(ctx, c.channel_id, c.guild_id)
+        ]
+        if not commitments:
+            continue
+        by_user: dict[str, list[Commitment]] = {}
+        for c in commitments:
+            by_user.setdefault(c.user_id, []).append(c)
 
-            detail_lines: list[str] = []
-            for uid in sorted(by_user.keys()):
-                detail_lines.append(f"{_mention(uid)}")
-                for c in by_user[uid]:
-                    detail_lines.append(f"- {c.name} (ends {c.end_date}): {c.description}")
-                    if c.notes:
-                        notes = c.notes.strip()
-                        if notes:
-                            detail_lines.append(f"  Notes: {notes}")
-            detail_block = "\n".join(detail_lines).strip()
-
-            system_lines = [
+        detail_lines: list[str] = []
+        for uid in sorted(by_user):
+            detail_lines.append(_mention(uid))
+            for c in by_user[uid]:
+                detail_lines.append(f"- {c.name} (ends {c.end_date}): {c.description}")
+                if c.notes and c.notes.strip():
+                    detail_lines.append(f"  Notes: {c.notes.strip()}")
+        system_message = "\n".join(
+            [
                 "You are sending a commitment check-in reminder for this channel.",
                 "Mention each user and list their commitments using the data below.",
                 "After listing, ask them to reply with: what they did, what's blocked, and what they'll do next.",
                 "If the user replies, make sure to keep track of their progress in the notes.",
                 "",
                 "Commitments due:",
-                detail_block,
+                "\n".join(detail_lines),
             ]
-            system_message = "\n".join(system_lines).strip()
-            user_message = "Send the commitment check-in reminder now."
+        ).strip()
+        try:
+            await request_reply(channel_id, system_message, "Send the commitment check-in reminder now.")
+        except Exception:
+            channels_failed += 1
+            _LOGGER.error(
+                "Failed to send commitment check-in to channel %s (commitments=%d users=%d).",
+                channel_id,
+                len(commitments),
+                len(by_user),
+                exc_info=True,
+            )
+            continue
+        if ctx.privacy.generation != privacy_generation:
+            break
 
-            try:
-                await request_reply(channel_id, system_message, user_message)
-            except Exception:
-                channels_failed += 1
-                _LOGGER.error(
-                    "Failed to send commitment check-in to channel %s (commitments=%d users=%d).",
-                    channel_id,
-                    len(commitments),
-                    len(by_user),
-                    exc_info=True,
-                )
-                continue
-            channels_pinged += 1
-            due_ids.extend(c.id for c in commitments)
+        due_ids = [c.id for c in commitments]
 
-        # 4) Mark last_checkin_date for what we pinged
-        if due_ids:
-            qmarks = ",".join(["?"] * len(due_ids))
+        def _mark_delivered(conn: sqlite3.Connection, commitment_ids: tuple[int, ...] = tuple(due_ids)) -> None:
+            qmarks = ",".join("?" for _ in commitment_ids)
             conn.execute(
                 f"""
                 UPDATE commitments
                 SET last_checkin_date = ?, updated_at = ?
-                WHERE id IN ({qmarks})
+                WHERE id IN ({qmarks}) AND status = 'active'
                 """,
-                (today_s, now, *due_ids),
+                (today_s, _now_ms(), *commitment_ids),
             )
+            conn.commit()
 
-        conn.commit()
-        commitments_pinged = len(due_ids)
-        if channels_pinged or channels_failed:
-            _LOGGER.info(
-                "Commitment check-in result: channels_pinged=%d commitments_pinged=%d channels_failed=%d",
-                channels_pinged,
-                commitments_pinged,
-                channels_failed,
-            )
-        else:
-            _LOGGER.debug(
-                "Commitment check-in result: no commitments due (active=%d)",
-                len(rows),
-            )
-        return {
-            "ok": True,
-            "channels_pinged": channels_pinged,
-            "commitments_pinged": commitments_pinged,
-            "channels_failed": channels_failed,
-        }
+        await _with_db(ctx, _mark_delivered)
+        channels_pinged += 1
+        commitments_pinged += len(due_ids)
 
-    # Run in thread (sqlite is sync)
-    return await _with_db(ctx, lambda conn: asyncio.run(_work(conn)))
+    if channels_pinged or channels_failed:
+        _LOGGER.info(
+            "Commitment check-in result: channels_pinged=%d commitments_pinged=%d channels_failed=%d",
+            channels_pinged,
+            commitments_pinged,
+            channels_failed,
+        )
+    else:
+        _LOGGER.debug("Commitment check-in result: no commitments due (active=%d)", active_count)
+    return {
+        "ok": channels_failed == 0,
+        "channels_pinged": channels_pinged,
+        "commitments_pinged": commitments_pinged,
+        "channels_failed": channels_failed,
+    }
 
 
 async def purge_user_data(ctx: GlobalContext, user_id: str) -> None:

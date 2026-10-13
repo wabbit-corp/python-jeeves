@@ -59,6 +59,10 @@ The entries below are derived from the git history and grouped by release date.
 - Voice transcriber now disconnects after 60 seconds with no non-bot members in the channel.
 - Voice transcription defaults now chunk faster (shorter silence and max segment thresholds).
 ### Fixed
+- Indexed search formats legacy TEXT timestamps without crashing. Discord search waits briefly for an index being prepared, preserves unfinished backfills, and exposes a retry hint for manual requests.
+- Commitment check-ins release database transactions before generating replies or executing tools. Provider errors, empty/incomplete replies, and Discord delivery failures leave reminders due for retry; callback failures are no longer accidentally dispatched twice.
+- Event feeds retry intermittent HTTP failures, persist failure details and retry schedules, and report failed polling accurately without consuming first-run seeding after a failed fetch.
+- Runtime installation now provisions matching Chromium artifacts and native Linux libraries and verifies a browser launch using the service account's cache. Service tmpfs mounts use writable sticky directories so browser profiles and other temporary files can be created.
 - Discord image attachments now reach Vox's conversational model, including image-only DMs and permitted reply images; expired attachment URLs are excluded from older cached context.
 - Missing English/translatable YouTube captions now return a useful unavailable result instead of constructing an invalid library exception. Transcript network requests run outside the Discord event loop.
 - Startup timestamp migration skips canonical values in legacy TEXT columns and records completion, avoiding repeated rewrites of the message archive on every restart.

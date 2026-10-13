@@ -250,3 +250,33 @@ def test_indexed_messages_search_regex_scan(tmp_path: Path) -> None:
     rows_scanned = result.get("rows_scanned")
     assert isinstance(rows_scanned, int)
     assert rows_scanned >= 1
+
+
+def test_search_formats_legacy_text_timestamps(tmp_path: Path) -> None:
+    db_path = tmp_path / "legacy.db"
+    _seed_db(db_path)
+    conn = sqlite3.connect(db_path)
+    try:
+        # Reproduce the deployed column affinities rather than only a helper input.
+        schema = conn.execute("SELECT sql FROM sqlite_master WHERE name = 'messages'").fetchone()[0]
+        conn.execute("ALTER TABLE messages RENAME TO original_messages")
+        conn.execute(
+            schema.replace("created_at INTEGER", "created_at TEXT")
+            .replace("edited_at INTEGER", "edited_at TEXT")
+            .replace("deleted_at INTEGER", "deleted_at TEXT")
+        )
+        conn.execute("INSERT INTO messages SELECT * FROM original_messages")
+        conn.execute(
+            "UPDATE messages SET created_at = '1704067200000', edited_at = '1704067260000', deleted_at = '1704067320000' WHERE message_id = '200'"
+        )
+        conn.commit()
+        assert conn.execute("SELECT typeof(created_at) FROM messages WHERE message_id = '200'").fetchone()[0] == "text"
+    finally:
+        conn.close()
+    result = asyncio.run(
+        indexed_message_search.indexed_messages_search(_ctx(db_path), {"query": "Hello", "include_deleted": True})
+    )
+    row = _get_results(result)[0]
+    assert row["created_at"] == "2024-01-01T00:00:00Z"
+    assert row["edited_at"] == "2024-01-01T00:01:00Z"
+    assert row["deleted_at"] == "2024-01-01T00:02:00Z"

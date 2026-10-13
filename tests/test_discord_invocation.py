@@ -495,3 +495,30 @@ def test_server_removal_and_ready_reconciliation_are_wired(monkeypatch: pytest.M
     assert remove.call_args.args[1] == "321"
     assert set(remove.call_args.args[2]) == {"10", "11"}
     reconcile.assert_awaited_once()
+
+
+@pytest.mark.parametrize("generated", [False, True])
+def test_background_runtime_failure_is_not_dispatched_twice(monkeypatch: pytest.MonkeyPatch, generated: bool) -> None:
+    _, handle_message, _ = _prepare_main(monkeypatch)
+    ctx = getattr(servant_app, "GlobalContext")()
+    monkeypatch.setattr(guild_retention, "reconcile", AsyncMock())
+    monkeypatch.setattr(discord.Client, "close", AsyncMock())
+    monkeypatch.setattr(discord.Client, "user", property(lambda _self: SimpleNamespace(id=123, name="Vox")))
+    send = AsyncMock(side_effect=RuntimeError("Synthetic delivery failure"))
+    handle_message.side_effect = RuntimeError("Synthetic generation failure")
+
+    async def start(client: discord.Client, _token: str, *, reconnect: bool) -> None:
+        monkeypatch.setattr(client, "wait_until_ready", AsyncMock())
+        monkeypatch.setattr(client, "get_channel", lambda _id: SimpleNamespace(id=10, guild=None, send=send))
+        with pytest.raises(RuntimeError, match="Synthetic"):
+            if generated:
+                assert ctx.request_vox_reply is not None
+                await ctx.request_vox_reply("10", "Reminder", "Send reminder")
+            else:
+                assert ctx.send_discord_message is not None
+                await ctx.send_discord_message("10", "Reminder")
+
+    monkeypatch.setattr(discord.Client, "start", start)
+    asyncio.run(servant_app.main())
+    assert handle_message.await_count == (1 if generated else 0)
+    assert send.await_count == (0 if generated else 1)

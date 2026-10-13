@@ -20,8 +20,8 @@ TimeoutStopSec=30
 NoNewPrivileges=yes
 PrivateTmp=no
 LogNamespace=vox
-TemporaryFileSystem=/tmp:rw,nosuid,nodev,noexec,size=128M
-TemporaryFileSystem=/var/tmp:rw,nosuid,nodev,noexec,size=32M
+TemporaryFileSystem=/tmp:rw,nosuid,nodev,noexec,size=128M,mode=1777
+TemporaryFileSystem=/var/tmp:rw,nosuid,nodev,noexec,size=32M,mode=1777
 ProtectSystem=full
 ProtectHome=yes
 ReadWritePaths=/var/lib/python-jeeves /var/cache/python-jeeves

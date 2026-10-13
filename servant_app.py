@@ -534,9 +534,9 @@ async def handle_incoming_message(
     reasoning_effort: llm_throttling.ReasoningEffort = llm_throttling.DEFAULT_REASONING_EFFORT,
 ) -> None:
     if ctx.privacy.is_opted_out(discord_message.author.id):
-        return
+        raise asyncio.CancelledError
     if not channel_controls.allows_channel(ctx, discord_message.channel):
-        return
+        raise asyncio.CancelledError
     privacy_generation = ctx.privacy.generation
     channel_id_value = getattr(discord_message.channel, "id", None)
     if channel_id_value is None:
@@ -625,7 +625,7 @@ async def handle_incoming_message(
                 )
             except openai.APIError as e:
                 _LOGGER.error("OpenAI API Error: %s", e)
-                return
+                raise
 
             if ctx.privacy.generation != privacy_generation:
                 raise asyncio.CancelledError
@@ -652,6 +652,8 @@ async def handle_incoming_message(
                     content = content[m.end() :].strip()
                 assistant_message = _build_assistant_message(content, tool_calls_param)
                 jeeves_messages[-1] = assistant_message
+                if not content.strip():
+                    raise RuntimeError("Vox produced no reply to deliver.")
                 await reply(discord_message, content)
                 ctx.channel_messages[channel_id].append(_message_to_json(assistant_message))
                 break
@@ -771,7 +773,7 @@ async def handle_incoming_message(
                 continue
 
             _LOGGER.warning("Unhandled finish reason: %s", finish_reason)
-            break
+            raise RuntimeError(f"Vox reply did not complete: {finish_reason}")
 
 
 async def main(*, allow_privileged_intents: bool = True) -> None:
@@ -1333,6 +1335,8 @@ async def main(*, allow_privileged_intents: bool = True) -> None:
                 await task
             except asyncio.CancelledError:
                 _LOGGER.info("Canceled request for message %s", message_id)
+            except openai.APIError:
+                _LOGGER.warning("Could not generate a reply for message %s", message_id)
             finally:
                 ctx.pending_cancels.pop(message_id, None)
 
@@ -1401,12 +1405,13 @@ async def main(*, allow_privileged_intents: bool = True) -> None:
         # If we're already on the Discord loop, just do it.
         try:
             running = asyncio.get_running_loop()
-            if running is loop:
-                await _discord_send_impl(channel_id, content)
-                return
         except RuntimeError:
             # No running loop in this thread (common in worker threads)
             running = None
+
+        if running is loop:
+            await _discord_send_impl(channel_id, content)
+            return
 
         # Hop onto Discord loop from anywhere else.
         fut: Future[None] = asyncio.run_coroutine_threadsafe(
@@ -1429,7 +1434,7 @@ async def main(*, allow_privileged_intents: bool = True) -> None:
     @processing_event
     async def _request_vox_reply_impl(channel_id: str, system_message: str, user_message: str) -> None:
         if channel_id in ctx.guild_retention.removed_channels or not database.processing_is_valid():
-            return
+            raise asyncio.CancelledError
         privacy_generation = ctx.privacy.generation
         await client.wait_until_ready()
         channel = client.get_channel(int(channel_id))
@@ -1440,13 +1445,13 @@ async def main(*, allow_privileged_intents: bool = True) -> None:
         bot_user = client.user
         guild = getattr(channel, "guild", None)
         if not channel_controls.allows_channel(ctx, channel):
-            return
+            raise asyncio.CancelledError
         if guild is not None and str(guild.id) in ctx.guild_retention.removed_guilds:
-            return
+            raise asyncio.CancelledError
         if bot_user is None:
             raise RuntimeError("Discord client user not available.")
         if ctx.privacy.generation != privacy_generation:
-            return
+            raise asyncio.CancelledError
 
         message_id = int(time.time() * 1000)
         author_payload = _user_payload(str(bot_user.id), bot_user.name)
@@ -1489,11 +1494,12 @@ async def main(*, allow_privileged_intents: bool = True) -> None:
 
         try:
             running = asyncio.get_running_loop()
-            if running is loop:
-                await _request_vox_reply_impl(channel_id, system_message, user_message)
-                return
         except RuntimeError:
             running = None
+
+        if running is loop:
+            await _request_vox_reply_impl(channel_id, system_message, user_message)
+            return
 
         fut: Future[None] = asyncio.run_coroutine_threadsafe(
             _request_vox_reply_impl(channel_id, system_message, user_message),

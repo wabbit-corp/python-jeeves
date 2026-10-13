@@ -4,6 +4,7 @@ import asyncio
 import datetime as dt
 import json
 import logging
+import math
 import time
 from collections.abc import AsyncIterable, Callable, Iterable, Sequence
 from pathlib import Path
@@ -38,6 +39,8 @@ DEFAULT_ARCHIVED_THREADS_FORBIDDEN_BACKOFF_DAYS = 5
 DISCORD_EPOCH_MS = 1420070400000
 DEFAULT_SEARCH_MAX_RESULTS = 200
 MAX_SEARCH_MAX_RESULTS = 5000
+SEARCH_INDEX_MAX_ATTEMPTS = 3
+SEARCH_INDEX_MAX_WAIT_SECONDS = 10.0
 DEFAULT_THREAD_DISCOVERY_RUN_EVERY_SECONDS = 300
 DEFAULT_LLM_THROTTLE_WINDOW_SECONDS = 60 * 60
 DEFAULT_LLM_THROTTLE_MAX_REQUESTS = 5
@@ -47,6 +50,12 @@ _LEGACY_LLM_THROTTLE_MAX_REQUESTS = 6
 
 RowTuple = tuple[object, ...]
 T = TypeVar("T")
+
+
+class SearchIndexNotReady(RuntimeError):
+    def __init__(self, retry_after: float) -> None:
+        self.retry_after = retry_after
+        super().__init__("Discord is still preparing this server's search index.")
 
 
 def _db_path(ctx: GlobalContext) -> Path:
@@ -183,6 +192,8 @@ def _ensure_channel_state_search_fields(conn: sqlite3.Connection) -> None:
     if "search_forbidden_count" not in columns:
         conn.execute("ALTER TABLE channel_state ADD COLUMN search_forbidden_count INTEGER DEFAULT 0;")
         conn.execute("UPDATE channel_state SET search_forbidden_count = 0 WHERE search_forbidden_count IS NULL")
+    if "search_retry_after" not in columns:
+        conn.execute("ALTER TABLE channel_state ADD COLUMN search_retry_after INTEGER;")
 
 
 def _ensure_channel_state_pins_fields(conn: sqlite3.Connection) -> None:
@@ -2173,10 +2184,11 @@ def _pick_channel_state_search(conn: sqlite3.Connection, now: int) -> sqlite3.Ro
           AND (disabled_until IS NULL OR disabled_until <= ?)
           AND (fetch_forbidden_until IS NULL OR fetch_forbidden_until <= ?)
           AND (search_forbidden_until IS NULL OR search_forbidden_until <= ?)
+          AND (search_retry_after IS NULL OR search_retry_after <= ?)
         ORDER BY search_last_indexed_at IS NOT NULL, search_last_indexed_at ASC
         LIMIT 1
         """,
-        (now, now, now),
+        (now, now, now, now),
     ).fetchone()
     return row
 
@@ -2316,7 +2328,9 @@ def _update_channel_state_search(
             search_last_indexed_at = ?,
             updated_at = ?,
             search_forbidden_count = 0,
-            search_forbidden_until = NULL
+            search_forbidden_until = NULL,
+            search_retry_after = NULL,
+            search_last_error = NULL
         WHERE channel_id = ?
         """,
         (
@@ -3744,6 +3758,22 @@ async def _index_next_channel_messages_search(ctx: GlobalContext, client: discor
             oldest_first=False,
             include_nsfw=None,
         )
+    except SearchIndexNotReady as e:
+        now = _now_ms()
+        retry_at = now + math.ceil(e.retry_after * 1000)
+        explanation = str(e)
+
+        def _defer_search(conn: sqlite3.Connection) -> None:
+            conn.execute(
+                """UPDATE channel_state
+                   SET search_done = 0, search_retry_after = ?, search_last_indexed_at = ?,
+                       search_last_error = ?, updated_at = ? WHERE channel_id = ?""",
+                (retry_at, now, explanation, now, channel_id),
+            )
+
+        await _with_db(ctx, _defer_search)
+        _LOGGER.info("Discord search index preparing for channel %s; retrying later", channel_id)
+        return {"messages_indexed": 0, "pending": True, "retry_after": e.retry_after}
     except discord.Forbidden as e:
         _LOGGER.error(
             "Search API forbidden for channel %s: %s",
@@ -4286,8 +4316,22 @@ async def _search_guild_messages(
     if include_nsfw is not None:
         params["include_nsfw"] = "true" if include_nsfw else "false"
 
-    result: JSONDict = await client.http.request(route, params=params)
-    return result
+    waited = 0.0
+    for attempt in range(SEARCH_INDEX_MAX_ATTEMPTS):
+        result: JSONDict = await client.http.request(route, params=params)
+        if result.get("code") != 110000:
+            if not isinstance(result.get("messages"), list):
+                raise ValueError("Discord search returned no messages array.")
+            return result
+        hint = result.get("retry_after")
+        retry_after = float(hint) if isinstance(hint, (int, float)) and not isinstance(hint, bool) else 1.0
+        if not math.isfinite(retry_after) or retry_after <= 0:
+            retry_after = 1.0
+        if attempt == SEARCH_INDEX_MAX_ATTEMPTS - 1 or waited + retry_after > SEARCH_INDEX_MAX_WAIT_SECONDS:
+            raise SearchIndexNotReady(retry_after)
+        await asyncio.sleep(retry_after)
+        waited += retry_after
+    raise AssertionError("Search retry loop must return or raise.")
 
 
 async def index_messages_search(ctx: GlobalContext, obj: JSON) -> JSONDict:
@@ -4385,6 +4429,15 @@ async def index_messages_search(ctx: GlobalContext, obj: JSON) -> JSONDict:
                 oldest_first=oldest_first,
                 include_nsfw=include_nsfw,
             )
+        except SearchIndexNotReady as e:
+            return {
+                "ok": False,
+                "pending": True,
+                "error": str(e),
+                "retry_after": e.retry_after,
+                "messages_indexed": messages_indexed,
+                "next_offset": cursor,
+            }
         except Exception as e:
             _LOGGER.error(
                 "Search API failed for guild %s channel %s: %s",
