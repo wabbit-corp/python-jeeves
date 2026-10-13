@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Wabbit-Public-Test-License-1.1
 import asyncio
 import datetime as dt
 import json
@@ -12,6 +13,38 @@ from servant import database as sqlite3
 from servant.defs import GlobalContext
 from servant.modules import background_indexer
 from typed_json import JSONDict
+
+
+def test_legacy_text_timestamps_are_migrated_once_without_rewriting_valid_rows(tmp_path: Path) -> None:
+    conn = background_indexer._connect(tmp_path / "legacy.sqlite3")
+    try:
+        conn.execute(
+            "CREATE TABLE guilds (guild_id TEXT PRIMARY KEY, name TEXT NOT NULL, created_at TEXT, updated_at TEXT)"
+        )
+        conn.executemany(
+            "INSERT INTO guilds (guild_id, name, created_at, updated_at) VALUES (?, 'test', ?, ?)",
+            [
+                ("1", "1704067200000", "1704067200000"),
+                ("2", "2024-01-01T00:00:00Z", "1704067200"),
+            ],
+        )
+        conn.execute("CREATE TABLE timestamp_writes (guild_id TEXT)")
+        conn.execute(
+            "CREATE TRIGGER observe_updates AFTER UPDATE ON guilds BEGIN INSERT INTO timestamp_writes VALUES (new.guild_id); END"
+        )
+        background_indexer._init_db(conn)
+        assert [tuple(row) for row in conn.execute("SELECT created_at, updated_at FROM guilds ORDER BY guild_id")] == [
+            ("1704067200000", "1704067200000"),
+            ("1704067200000", "1704067200000"),
+        ]
+        assert [row[0] for row in conn.execute("SELECT guild_id FROM timestamp_writes")] == ["2", "2"]
+        statements: list[str] = []
+        conn.set_trace_callback(statements.append)
+        background_indexer._init_db(conn)
+        assert not any("SELECT rowid" in statement for statement in statements)
+        assert conn.execute("SELECT count(*) FROM timestamp_writes").fetchone()[0] == 2
+    finally:
+        conn.close()
 
 
 class _FakeReference:
@@ -56,8 +89,8 @@ class _FakeMessage:
         self.content = "hello"
         self.mentions = [_FakeUser(mention_id)]
         self.mention_everyone = False
-        self.attachments = []
-        self.embeds = []
+        self.attachments: list[discord.Attachment] = []
+        self.embeds: list[discord.Embed] = []
         self.pinned = False
         self.created_at = dt.datetime(2024, 1, 1, tzinfo=dt.timezone.utc)
         self.edited_at = None
@@ -107,7 +140,7 @@ def test_channel_row_forum_extra_json(monkeypatch: pytest.MonkeyPatch) -> None:
             self.default_sort_order = SimpleNamespace(value=1)
             self.default_forum_layout = SimpleNamespace(value=2)
 
-    monkeypatch.setattr(background_indexer.discord, "ForumChannel", _FakeForumChannel, raising=False)
+    monkeypatch.setattr(discord, "ForumChannel", _FakeForumChannel, raising=False)
 
     row = background_indexer._channel_row(cast(discord.abc.GuildChannel, _FakeForumChannel()), guild_id=42, now=0)
     extra_json = row[-1]
@@ -140,7 +173,7 @@ def test_channel_row_voice_extra_json(monkeypatch: pytest.MonkeyPatch) -> None:
             self.rtc_region = "us-west"
             self.video_quality_mode = SimpleNamespace(value=3)
 
-    monkeypatch.setattr(background_indexer.discord, "VoiceChannel", _FakeVoiceChannel, raising=False)
+    monkeypatch.setattr(discord, "VoiceChannel", _FakeVoiceChannel, raising=False)
 
     row = background_indexer._channel_row(cast(discord.abc.GuildChannel, _FakeVoiceChannel()), guild_id=99, now=0)
     extra_json = row[-1]

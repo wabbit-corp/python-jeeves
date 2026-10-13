@@ -36,14 +36,12 @@ def _format_csv_value(value: object) -> str | int | float:
 
 
 def _list_tables(conn: sqlite3.Connection) -> list[str]:
-    rows = conn.execute(
-        """
+    rows = conn.execute("""
         SELECT name
         FROM sqlite_master
         WHERE type = 'table' AND name NOT LIKE 'sqlite_%'
         ORDER BY name
-        """
-    ).fetchall()
+        """).fetchall()
     return [str(row["name"]) for row in rows]
 
 

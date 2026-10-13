@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Wabbit-Public-Test-License-1.1
 from __future__ import annotations
 
 import asyncio
@@ -10,6 +11,19 @@ from openai import AsyncOpenAI
 
 import servant_app
 from servant.defs import GlobalContext
+
+
+def test_expired_cached_images_do_not_break_text_context() -> None:
+    restored = servant_app._message_from_json(
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "previous message"},
+                {"type": "image_url", "image_url": {"url": "https://cdn.discordapp.com/attachments/1/2/a.png?ex=1"}},
+            ],
+        }
+    )
+    assert restored == {"role": "user", "content": [{"type": "text", "text": "previous message"}]}
 
 
 class _NullTypingIndicator:

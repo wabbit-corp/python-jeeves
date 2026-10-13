@@ -1,5 +1,38 @@
 # Jeeves
 
+![Vox project banner](./.meta/github-project-banner.png)
+
+<img src="https://img.shields.io/badge/python-3.10%2B-blue" alt="Python 3.10 or newer" />
+
+Vox is a Discord assistant for contextual replies, conversation retrieval, reminders,
+and requested topic notifications.
+
+## 🚀 Installation
+
+Install SQLCipher 4, create a Python environment, and install the runtime dependencies:
+
+```bash
+python3 -m venv .venv
+.venv/bin/python -m pip install -r requirements.runtime.txt
+```
+
+Configure Discord and provider credentials using the production template in `deploy/`.
+See the [deployment guide](deploy/README.md) for protected configuration and storage setup.
+
+## 🚀 Usage
+
+Start Vox with `.venv/bin/python servant_app.py` after setting `JEEVES_CONFIG_PATH`
+and `JEEVES_DB_KEY_FILE`. Mention `@Vox`, say `vox` or `v`, or send a DM to request help.
+
+## Licensing
+
+The runtime is licensed under [AGPL-3.0-or-later](LICENSE.md).
+
+## Contributing
+
+Test contributions use the license described in [CONTRIBUTING.md](CONTRIBUTING.md);
+read that guide before contributing. Run `dev check python-jeeves` from the workspace.
+
 Read the [Vox Terms of Service](TERMS.md) for service rules and conditions.
 Read the [Vox Privacy Policy](PRIVACY.md) for data processing details and privacy requests.
 Contact [wabbit@wabbit.one](mailto:wabbit@wabbit.one) with privacy questions or deletion requests.

@@ -12,8 +12,9 @@ from typing import TypeVar
 import discord
 from discord.http import Route
 
-from servant import channel_controls, permissions
+from servant import channel_policy as channel_controls
 from servant import database as sqlite3
+from servant import permissions
 from servant.defs import GlobalContext, RoutineTask, ToolDef
 from typed_json import JSON, JSONDict, coerce_int, coerce_snowflake, coerce_str
 
@@ -74,13 +75,11 @@ def _ensure_guild_members_last_seen_at(conn: sqlite3.Connection) -> None:
     columns = {row["name"] for row in conn.execute("PRAGMA table_info(guild_members)")}
     if "last_seen_at" not in columns:
         conn.execute("ALTER TABLE guild_members ADD COLUMN last_seen_at INTEGER;")
-        conn.execute(
-            """
+        conn.execute("""
             UPDATE guild_members
             SET last_seen_at = updated_at
             WHERE last_seen_at IS NULL
-            """
-        )
+            """)
 
 
 def _ensure_messages_deleted_at(conn: sqlite3.Connection) -> None:
@@ -93,26 +92,22 @@ def _ensure_messages_content_available(conn: sqlite3.Connection) -> None:
     columns = {row["name"] for row in conn.execute("PRAGMA table_info(messages)")}
     if "content_available" not in columns:
         conn.execute("ALTER TABLE messages ADD COLUMN content_available INTEGER;")
-        conn.execute(
-            """
+        conn.execute("""
             UPDATE messages
             SET content_available = CASE WHEN content IS NULL THEN 0 ELSE 1 END
             WHERE content_available IS NULL
-            """
-        )
+            """)
 
 
 def _ensure_messages_mention_everyone(conn: sqlite3.Connection) -> None:
     columns = {row["name"] for row in conn.execute("PRAGMA table_info(messages)")}
     if "mention_everyone" not in columns:
         conn.execute("ALTER TABLE messages ADD COLUMN mention_everyone INTEGER;")
-        conn.execute(
-            """
+        conn.execute("""
             UPDATE messages
             SET mention_everyone = 0
             WHERE mention_everyone IS NULL
-            """
-        )
+            """)
 
 
 def _ensure_messages_reply_fields(conn: sqlite3.Connection) -> None:
@@ -141,13 +136,11 @@ def _ensure_channel_state_thread_backoff(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE channel_state ADD COLUMN archived_threads_forbidden_until INTEGER;")
     if "archived_threads_error_count" not in columns:
         conn.execute("ALTER TABLE channel_state ADD COLUMN archived_threads_error_count INTEGER DEFAULT 0;")
-        conn.execute(
-            """
+        conn.execute("""
             UPDATE channel_state
             SET archived_threads_error_count = 0
             WHERE archived_threads_error_count IS NULL
-            """
-        )
+            """)
     if "archived_threads_last_error" not in columns:
         conn.execute("ALTER TABLE channel_state ADD COLUMN archived_threads_last_error TEXT;")
     if "archived_threads_last_error_at" not in columns:
@@ -252,6 +245,10 @@ def _migrate_default_llm_throttle_policy(conn: sqlite3.Connection) -> None:
 
 
 def _migrate_timestamp_columns(conn: sqlite3.Connection) -> None:
+    migration = "timestamps_epoch_ms_v1"
+    conn.execute("CREATE TABLE IF NOT EXISTS index_schema_migrations (name TEXT PRIMARY KEY)")
+    if conn.execute("SELECT 1 FROM index_schema_migrations WHERE name = ?", (migration,)).fetchone():
+        return
     tables = {
         "guilds": ["created_at", "updated_at"],
         "channels": ["created_at", "updated_at"],
@@ -292,27 +289,30 @@ def _migrate_timestamp_columns(conn: sqlite3.Connection) -> None:
 
     for table, columns in tables.items():
         for column in columns:
-            rows = conn.execute(
-                f"""
+            rows = conn.execute(f"""
                 SELECT rowid, {column}
                 FROM {table}
                 WHERE {column} IS NOT NULL
                   AND typeof({column}) IN ('text', 'real')
-                """
-            ).fetchall()
+                """).fetchall()
             for row in rows:
-                ms = _parse_epoch_ms(row[column])
+                value = row[column]
+                ms = _parse_epoch_ms(value)
                 if ms is None:
+                    continue
+                # Legacy TEXT affinity converts written integers back to strings.
+                # Do not rewrite canonical milliseconds and fire every privacy trigger again.
+                if isinstance(value, str) and value == str(ms):
                     continue
                 conn.execute(
                     f"UPDATE {table} SET {column} = ? WHERE rowid = ?",
                     (ms, row["rowid"]),
                 )
+    conn.execute("INSERT INTO index_schema_migrations (name) VALUES (?)", (migration,))
 
 
 def _init_db(conn: sqlite3.Connection) -> None:
-    conn.execute(
-        """
+    conn.execute("""
         CREATE TABLE IF NOT EXISTS guilds (
             guild_id TEXT PRIMARY KEY,
             name TEXT NOT NULL,
@@ -323,10 +323,8 @@ def _init_db(conn: sqlite3.Connection) -> None:
             created_at INTEGER,
             updated_at INTEGER
         );
-        """
-    )
-    conn.execute(
-        """
+        """)
+    conn.execute("""
         CREATE TABLE IF NOT EXISTS channels (
             channel_id TEXT PRIMARY KEY,
             guild_id TEXT,
@@ -341,11 +339,9 @@ def _init_db(conn: sqlite3.Connection) -> None:
             updated_at INTEGER,
             extra_json TEXT
         );
-        """
-    )
+        """)
     conn.execute("CREATE INDEX IF NOT EXISTS idx_channels_guild_id ON channels(guild_id);")
-    conn.execute(
-        """
+    conn.execute("""
         CREATE TABLE IF NOT EXISTS users (
             user_id TEXT PRIMARY KEY,
             name TEXT,
@@ -357,10 +353,8 @@ def _init_db(conn: sqlite3.Connection) -> None:
             created_at INTEGER,
             updated_at INTEGER
         );
-        """
-    )
-    conn.execute(
-        """
+        """)
+    conn.execute("""
         CREATE TABLE IF NOT EXISTS guild_members (
             guild_id TEXT NOT NULL,
             user_id TEXT NOT NULL,
@@ -377,11 +371,9 @@ def _init_db(conn: sqlite3.Connection) -> None:
             updated_at INTEGER,
             PRIMARY KEY (guild_id, user_id)
         );
-        """
-    )
+        """)
     conn.execute("CREATE INDEX IF NOT EXISTS idx_guild_members_user_id ON guild_members(user_id);")
-    conn.execute(
-        """
+    conn.execute("""
         CREATE TABLE IF NOT EXISTS messages (
             message_id TEXT PRIMARY KEY,
             channel_id TEXT,
@@ -401,8 +393,7 @@ def _init_db(conn: sqlite3.Connection) -> None:
             embeds_count INTEGER,
             pinned INTEGER
         );
-        """
-    )
+        """)
     conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_channel_id ON messages(channel_id);")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_guild_id ON messages(guild_id);")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_author_id ON messages(author_id);")
@@ -411,41 +402,34 @@ def _init_db(conn: sqlite3.Connection) -> None:
     conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_author_created ON messages(author_id, created_at);")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_deleted_at ON messages(deleted_at);")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_pinned ON messages(channel_id, pinned);")
-    conn.execute(
-        """
+    conn.execute("""
         CREATE TABLE IF NOT EXISTS message_user_mentions (
             message_id TEXT NOT NULL,
             user_id TEXT NOT NULL,
             PRIMARY KEY (message_id, user_id),
             FOREIGN KEY(message_id) REFERENCES messages(message_id) ON DELETE CASCADE
         );
-        """
-    )
+        """)
     conn.execute("CREATE INDEX IF NOT EXISTS idx_message_user_mentions_user_id ON message_user_mentions(user_id);")
-    conn.execute(
-        """
+    conn.execute("""
         CREATE TABLE IF NOT EXISTS message_role_mentions (
             message_id TEXT NOT NULL,
             role_id TEXT NOT NULL,
             PRIMARY KEY (message_id, role_id)
         );
-        """
-    )
+        """)
     conn.execute("CREATE INDEX IF NOT EXISTS idx_message_role_mentions_role ON message_role_mentions(role_id);")
-    conn.execute(
-        """
+    conn.execute("""
         CREATE TABLE IF NOT EXISTS message_channel_mentions (
             message_id TEXT NOT NULL,
             channel_id TEXT NOT NULL,
             PRIMARY KEY (message_id, channel_id)
         );
-        """
-    )
+        """)
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_message_channel_mentions_channel ON message_channel_mentions(channel_id);"
     )
-    conn.execute(
-        """
+    conn.execute("""
         CREATE TABLE IF NOT EXISTS message_attachments (
             attachment_id TEXT PRIMARY KEY,
             message_id TEXT NOT NULL,
@@ -463,13 +447,11 @@ def _init_db(conn: sqlite3.Connection) -> None:
             updated_at INTEGER,
             FOREIGN KEY(message_id) REFERENCES messages(message_id) ON DELETE CASCADE
         );
-        """
-    )
+        """)
     conn.execute("CREATE INDEX IF NOT EXISTS idx_message_attachments_channel ON message_attachments(channel_id);")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_message_attachments_guild ON message_attachments(guild_id);")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_message_attachments_message_id ON message_attachments(message_id);")
-    conn.execute(
-        """
+    conn.execute("""
         CREATE TABLE IF NOT EXISTS message_embeds (
             message_id TEXT NOT NULL,
             idx INTEGER NOT NULL,
@@ -478,11 +460,9 @@ def _init_db(conn: sqlite3.Connection) -> None:
             PRIMARY KEY (message_id, idx),
             FOREIGN KEY(message_id) REFERENCES messages(message_id) ON DELETE CASCADE
         );
-        """
-    )
+        """)
     conn.execute("CREATE INDEX IF NOT EXISTS idx_message_embeds_message_id ON message_embeds(message_id);")
-    conn.execute(
-        """
+    conn.execute("""
         CREATE TABLE IF NOT EXISTS channel_state (
             channel_id TEXT PRIMARY KEY,
             guild_id TEXT,
@@ -510,13 +490,11 @@ def _init_db(conn: sqlite3.Connection) -> None:
             archived_threads_last_error TEXT,
             archived_threads_last_error_at INTEGER
         );
-        """
-    )
+        """)
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_channel_state_backfill ON channel_state(backfill_done, last_indexed_at);"
     )
-    conn.execute(
-        """
+    conn.execute("""
         CREATE TABLE IF NOT EXISTS guild_state (
             guild_id TEXT PRIMARY KEY,
             member_after_id TEXT,
@@ -529,10 +507,8 @@ def _init_db(conn: sqlite3.Connection) -> None:
             error_count INTEGER DEFAULT 0,
             last_error TEXT
         );
-        """
-    )
-    conn.execute(
-        """
+        """)
+    conn.execute("""
         CREATE TABLE IF NOT EXISTS roles (
             role_id TEXT PRIMARY KEY,
             guild_id TEXT NOT NULL,
@@ -548,22 +524,18 @@ def _init_db(conn: sqlite3.Connection) -> None:
             updated_at INTEGER,
             deleted_at INTEGER
         );
-        """
-    )
+        """)
     conn.execute("CREATE INDEX IF NOT EXISTS idx_roles_guild_id ON roles(guild_id);")
-    conn.execute(
-        """
+    conn.execute("""
         CREATE TABLE IF NOT EXISTS guild_member_roles (
             guild_id TEXT NOT NULL,
             user_id TEXT NOT NULL,
             role_id TEXT NOT NULL,
             PRIMARY KEY (guild_id, user_id, role_id)
         );
-        """
-    )
+        """)
     conn.execute("CREATE INDEX IF NOT EXISTS idx_guild_member_roles_role ON guild_member_roles(guild_id, role_id);")
-    conn.execute(
-        """
+    conn.execute("""
         CREATE TABLE IF NOT EXISTS guild_emojis (
             emoji_id TEXT PRIMARY KEY,
             guild_id TEXT NOT NULL,
@@ -574,11 +546,9 @@ def _init_db(conn: sqlite3.Connection) -> None:
             require_colons INTEGER,
             updated_at INTEGER
         );
-        """
-    )
+        """)
     conn.execute("CREATE INDEX IF NOT EXISTS idx_guild_emojis_guild_id ON guild_emojis(guild_id);")
-    conn.execute(
-        """
+    conn.execute("""
         CREATE TABLE IF NOT EXISTS guild_stickers (
             sticker_id TEXT PRIMARY KEY,
             guild_id TEXT NOT NULL,
@@ -589,11 +559,9 @@ def _init_db(conn: sqlite3.Connection) -> None:
             available INTEGER,
             updated_at INTEGER
         );
-        """
-    )
+        """)
     conn.execute("CREATE INDEX IF NOT EXISTS idx_guild_stickers_guild_id ON guild_stickers(guild_id);")
-    conn.execute(
-        """
+    conn.execute("""
         CREATE TABLE IF NOT EXISTS message_reactions (
             message_id TEXT NOT NULL,
             emoji_key TEXT NOT NULL,
@@ -603,11 +571,9 @@ def _init_db(conn: sqlite3.Connection) -> None:
             PRIMARY KEY (message_id, emoji_key),
             FOREIGN KEY(message_id) REFERENCES messages(message_id) ON DELETE CASCADE
         );
-        """
-    )
+        """)
     conn.execute("CREATE INDEX IF NOT EXISTS idx_message_reactions_message_id ON message_reactions(message_id);")
-    conn.execute(
-        """
+    conn.execute("""
         CREATE TABLE IF NOT EXISTS thread_parent_state (
             parent_channel_id TEXT PRIMARY KEY,
             guild_id TEXT,
@@ -619,10 +585,8 @@ def _init_db(conn: sqlite3.Connection) -> None:
             error_count INTEGER DEFAULT 0,
             last_error TEXT
         );
-        """
-    )
-    conn.execute(
-        """
+        """)
+    conn.execute("""
         CREATE TABLE IF NOT EXISTS llm_throttle_policy (
             policy_id INTEGER PRIMARY KEY CHECK (policy_id = 1),
             enabled INTEGER NOT NULL DEFAULT 0,
@@ -631,8 +595,7 @@ def _init_db(conn: sqlite3.Connection) -> None:
             downgraded_reasoning_effort TEXT NOT NULL DEFAULT 'low',
             updated_at INTEGER NOT NULL DEFAULT 0
         );
-        """
-    )
+        """)
     conn.execute(
         """
         INSERT OR IGNORE INTO llm_throttle_policy
@@ -646,8 +609,7 @@ def _init_db(conn: sqlite3.Connection) -> None:
             DEFAULT_LLM_THROTTLE_DOWNGRADED_REASONING_EFFORT,
         ),
     )
-    conn.execute(
-        """
+    conn.execute("""
         CREATE TABLE IF NOT EXISTS llm_request_events (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id TEXT NOT NULL,
@@ -658,22 +620,19 @@ def _init_db(conn: sqlite3.Connection) -> None:
             applied_reasoning_effort TEXT NOT NULL,
             throttled INTEGER NOT NULL DEFAULT 0
         );
-        """
-    )
+        """)
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_llm_request_events_user_created ON llm_request_events(user_id, created_at);"
     )
     conn.execute("CREATE INDEX IF NOT EXISTS idx_llm_request_events_created_at ON llm_request_events(created_at);")
-    conn.execute(
-        """
+    conn.execute("""
         CREATE TABLE IF NOT EXISTS llm_high_reasoning_exempt_roles (
             guild_id TEXT NOT NULL,
             role_id TEXT NOT NULL,
             created_at INTEGER NOT NULL,
             PRIMARY KEY (guild_id, role_id)
         );
-        """
-    )
+        """)
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_llm_high_reasoning_exempt_roles_guild "
         "ON llm_high_reasoning_exempt_roles(guild_id);"
@@ -697,9 +656,9 @@ def _init_db(conn: sqlite3.Connection) -> None:
     _ensure_guild_state_scan_completed_at(conn)
     _ensure_guild_state_error_fields(conn)
     _ensure_channels_extra_json(conn)
-    from servant import guild_retention, privacy
+    from servant import privacy, storage_schema
 
-    guild_retention.init_schema(conn)
+    storage_schema.init_retention_schema(conn)
     privacy.init_schema(conn)
     _migrate_default_llm_throttle_policy(conn)
     _migrate_timestamp_columns(conn)
@@ -897,9 +856,7 @@ def _get_int_config(ctx: GlobalContext, key: str, default: int) -> int:
     return coerce_int(raw, default)
 
 
-def _guild_row(
-    guild: discord.Guild, now: int
-) -> tuple[
+def _guild_row(guild: discord.Guild, now: int) -> tuple[
     str,
     str,
     str | None,
@@ -928,9 +885,7 @@ def _guild_row(
     )
 
 
-def _channel_row(
-    channel: discord.abc.GuildChannel | discord.Thread, guild_id: int, now: int
-) -> tuple[
+def _channel_row(channel: discord.abc.GuildChannel | discord.Thread, guild_id: int, now: int) -> tuple[
     str,
     str,
     str,
@@ -1067,9 +1022,7 @@ def _channel_row(
     )
 
 
-def _user_row(
-    user: discord.abc.User, now: int
-) -> tuple[
+def _user_row(user: discord.abc.User, now: int) -> tuple[
     str,
     str,
     str,
@@ -1135,9 +1088,7 @@ def _user_row_from_payload(
     )
 
 
-def _role_row(
-    role: discord.Role, now: int
-) -> tuple[
+def _role_row(role: discord.Role, now: int) -> tuple[
     str,
     str,
     str,
@@ -1180,9 +1131,7 @@ def _role_row(
     )
 
 
-def _emoji_row(
-    emoji: discord.Emoji, guild_id: str, now: int
-) -> tuple[
+def _emoji_row(emoji: discord.Emoji, guild_id: str, now: int) -> tuple[
     str,
     str,
     str,
@@ -1204,9 +1153,7 @@ def _emoji_row(
     )
 
 
-def _sticker_row(
-    sticker: discord.StickerItem, guild_id: str, now: int
-) -> tuple[
+def _sticker_row(sticker: discord.StickerItem, guild_id: str, now: int) -> tuple[
     str,
     str,
     str,
@@ -1311,9 +1258,7 @@ def _reaction_rows_from_payload(*, message_id: str, reactions: JSON, now: int) -
     return rows
 
 
-def _member_row(
-    member: discord.Member, now: int, left_at: int | None = None
-) -> tuple[
+def _member_row(member: discord.Member, now: int, left_at: int | None = None) -> tuple[
     str,
     str,
     str | None,
@@ -1382,9 +1327,7 @@ def _reply_ref_from_payload(payload: JSONDict) -> tuple[str | None, str | None, 
     )
 
 
-def _message_row(
-    message: discord.Message, now: int
-) -> tuple[
+def _message_row(message: discord.Message, now: int) -> tuple[
     str,
     str,
     str | None,
@@ -1427,9 +1370,7 @@ def _message_row(
     )
 
 
-def _message_row_from_payload(
-    payload: JSON, *, channel_id: str | None, guild_id: str | None
-) -> (
+def _message_row_from_payload(payload: JSON, *, channel_id: str | None, guild_id: str | None) -> (
     tuple[
         str,
         str | None,
@@ -1911,9 +1852,9 @@ def _replace_guild_stickers(
 
 
 def _upsert_users(conn: sqlite3.Connection, rows: list[RowTuple], *, guild_id: str | None = None) -> None:
-    from servant import guild_retention
+    from servant import storage_schema
 
-    if guild_retention.guild_is_removed(conn, guild_id):
+    if storage_schema.guild_is_removed(conn, guild_id):
         return
     if not rows:
         return
@@ -2260,15 +2201,13 @@ def _pick_channel_state_pins(conn: sqlite3.Connection, now: int, check_before: i
 def _pick_guild_state(conn: sqlite3.Connection, rescan_cutoff: int | None) -> sqlite3.Row | None:
     row: sqlite3.Row | None
     if rescan_cutoff is None:
-        row = conn.execute(
-            """
+        row = conn.execute("""
             SELECT guild_id, member_after_id, member_latest_id, scan_started_at, backfill_done, scan_completed_at
             FROM guild_state
             WHERE backfill_done = 0
             ORDER BY last_indexed_at IS NOT NULL, last_indexed_at ASC
             LIMIT 1
-            """
-        ).fetchone()
+            """).fetchone()
         return row
     row = conn.execute(
         """
@@ -2286,8 +2225,7 @@ def _pick_guild_state(conn: sqlite3.Connection, rescan_cutoff: int | None) -> sq
 
 
 def _pick_thread_parent_state(conn: sqlite3.Connection) -> sqlite3.Row | None:
-    row: sqlite3.Row | None = conn.execute(
-        """
+    row: sqlite3.Row | None = conn.execute("""
         SELECT parent_channel_id, guild_id,
                public_before_ts, private_before_ts,
                public_done, private_done
@@ -2297,8 +2235,7 @@ def _pick_thread_parent_state(conn: sqlite3.Connection) -> sqlite3.Row | None:
           AND NOT EXISTS(SELECT 1 FROM privacy_channel_controls p WHERE p.channel_id=thread_parent_state.parent_channel_id AND (p.allowed=0 OR p.pending=1))
         ORDER BY updated_at IS NOT NULL, updated_at ASC
         LIMIT 1
-        """
-    ).fetchone()
+        """).fetchone()
     return row
 
 

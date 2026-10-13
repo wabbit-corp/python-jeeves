@@ -2,6 +2,7 @@
 
 import asyncio
 import datetime as dt
+from collections.abc import AsyncIterator, Callable, Coroutine
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -12,6 +13,14 @@ import pytest
 from servant import database, permissions
 from servant.defs import GlobalContext, RequestContext
 from servant.modules import background_indexer, discord_search, indexed_message_search, topic_subscriptions
+from typed_json import JSON, JSONDict
+
+SearchTool = Callable[[GlobalContext, JSON], Coroutine[None, None, JSONDict]]
+
+
+def mock_client(ctx: GlobalContext) -> MagicMock:
+    assert isinstance(ctx.discord_client, MagicMock)
+    return ctx.discord_client
 
 
 def search_context(tmp_path: Path) -> GlobalContext:
@@ -47,7 +56,9 @@ def test_unfiltered_index_search_never_reads_other_channels_or_servers(tmp_path:
             [("100", "10", "1", "local"), ("101", "11", "1", "staff secret"), ("102", "20", "2", "other server")],
         )
     result = asyncio.run(indexed_message_search.indexed_messages_search(ctx, {}))
-    assert [item["message_id"] for item in result["results"]] == ["100"]
+    results = result["results"]
+    assert isinstance(results, list)
+    assert [item["message_id"] for item in results if isinstance(item, dict)] == ["100"]
 
 
 @pytest.mark.parametrize(
@@ -59,11 +70,13 @@ def test_unfiltered_index_search_never_reads_other_channels_or_servers(tmp_path:
     ],
 )
 @pytest.mark.parametrize("arguments", [{"channel_id": "11"}, {"channel_id": "20", "guild_id": "2"}])
-def test_message_tools_reject_other_channels_before_fetching_or_querying(tmp_path: Path, tool, arguments) -> None:
+def test_message_tools_reject_other_channels_before_fetching_or_querying(
+    tmp_path: Path, tool: SearchTool, arguments: JSONDict
+) -> None:
     ctx = search_context(tmp_path)
     with pytest.raises(PermissionError):
         asyncio.run(tool(ctx, arguments))
-    ctx.discord_client.fetch_channel.assert_not_called()
+    mock_client(ctx).fetch_channel.assert_not_called()
     assert not (tmp_path / "index.db").exists()
 
 
@@ -76,9 +89,9 @@ def test_message_tools_reject_other_channels_before_fetching_or_querying(tmp_pat
     ],
 )
 @pytest.mark.parametrize("failure", ["read_denied", "membership_lost", "disabled", "wrong_guild", "lookup_failed"])
-def test_message_search_fails_closed_with_current_permissions(tmp_path: Path, tool, failure: str) -> None:
+def test_message_search_fails_closed_with_current_permissions(tmp_path: Path, tool: SearchTool, failure: str) -> None:
     ctx = search_context(tmp_path)
-    channel = ctx.discord_client.fetch_channel.return_value
+    channel = mock_client(ctx).fetch_channel.return_value
     if failure == "read_denied":
         channel.permissions_for.return_value = discord.Permissions(view_channel=True, read_message_history=False)
     elif failure == "membership_lost":
@@ -88,7 +101,7 @@ def test_message_search_fails_closed_with_current_permissions(tmp_path: Path, to
     elif failure == "wrong_guild":
         channel.guild.id = 2
     else:
-        ctx.discord_client.fetch_channel.side_effect = RuntimeError("Discord unavailable")
+        mock_client(ctx).fetch_channel.side_effect = RuntimeError("Discord unavailable")
     with pytest.raises(PermissionError):
         asyncio.run(tool(ctx, {"channel_id": "10"}))
     channel.history.assert_not_called()
@@ -97,10 +110,10 @@ def test_message_search_fails_closed_with_current_permissions(tmp_path: Path, to
 
 def test_live_history_search_returns_only_allowed_authors(tmp_path: Path) -> None:
     ctx = search_context(tmp_path)
-    channel = ctx.discord_client.fetch_channel.return_value
+    channel = mock_client(ctx).fetch_channel.return_value
     ctx.privacy.opted_out_users.add("99")
 
-    async def history(**_kwargs):
+    async def history(**_kwargs: object) -> AsyncIterator[discord.Message]:
         for uid in (42, 99):
             message = MagicMock(spec=discord.Message)
             message.id = uid
@@ -116,12 +129,14 @@ def test_live_history_search_returns_only_allowed_authors(tmp_path: Path) -> Non
 
     channel.history.side_effect = history
     result = asyncio.run(discord_search.discord_search_messages(ctx, {"channel_id": "10"}))
-    assert [row["message_id"] for row in result["results"]] == ["42"]
+    results = result["results"]
+    assert isinstance(results, list)
+    assert [row["message_id"] for row in results if isinstance(row, dict)] == ["42"]
 
 
 def test_private_thread_requires_current_membership_and_parent_permissions(tmp_path: Path) -> None:
     ctx = search_context(tmp_path)
-    parent = ctx.discord_client.fetch_channel.return_value
+    parent = mock_client(ctx).fetch_channel.return_value
     thread = MagicMock(spec=discord.Thread)
     thread.id = 10
     thread.parent_id = 9
@@ -129,7 +144,7 @@ def test_private_thread_requires_current_membership_and_parent_permissions(tmp_p
     thread.is_private.return_value = True
     thread.permissions_for.return_value = parent.permissions_for.return_value
     thread.fetch_member.side_effect = RuntimeError("not a thread member")
-    ctx.discord_client.fetch_channel.side_effect = lambda cid: thread if cid == 10 else parent
+    mock_client(ctx).fetch_channel.side_effect = lambda cid: thread if cid == 10 else parent
     with pytest.raises(PermissionError):
         asyncio.run(permissions.require_search_scope(ctx))
     thread.fetch_member.side_effect = None
@@ -145,7 +160,7 @@ def test_dm_search_is_limited_to_requesters_own_conversation(tmp_path: Path, rec
     dm = MagicMock(spec=discord.DMChannel)
     dm.id = 10
     dm.recipient = SimpleNamespace(id=recipient_id)
-    ctx.discord_client.fetch_channel.return_value = dm
+    mock_client(ctx).fetch_channel.return_value = dm
     if recipient_id == 42:
         assert asyncio.run(permissions.require_search_scope(ctx)) is dm
     else:
@@ -160,7 +175,7 @@ def test_topic_notifications_check_subscribers_current_channel_access(
     from unittest.mock import AsyncMock
 
     ctx = search_context(tmp_path)
-    channel = ctx.discord_client.fetch_channel.return_value
+    channel = mock_client(ctx).fetch_channel.return_value
     channel.guild.name = "community"
     channel.permissions_for.return_value = discord.Permissions(view_channel=allowed, read_message_history=allowed)
     match = MagicMock(return_value=[{"user_id": "43", "topics": []}])
@@ -168,7 +183,8 @@ def test_topic_notifications_check_subscribers_current_channel_access(
     send = AsyncMock()
     monkeypatch.setattr(topic_subscriptions, "_send_dm", send)
     monkeypatch.setattr(topic_subscriptions, "_record_cooldowns", AsyncMock())
-    message = SimpleNamespace(
+    message = MagicMock(
+        spec=discord.Message,
         id=101,
         channel=channel,
         guild=channel.guild,

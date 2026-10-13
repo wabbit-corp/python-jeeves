@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Wabbit-Public-Test-License-1.1
 from __future__ import annotations
 
 import asyncio
@@ -5,11 +6,12 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import discord
+import discord.http
 import pytest
 from aiohttp import ClientResponse
 
 import servant_app
-from servant import llm_throttling, voice_transcriber
+from servant import guild_retention, llm_throttling, voice_transcriber
 from servant.defs import CancelHandle, GlobalContext
 from servant.modules import background_indexer, commitment, topic_subscriptions
 from typed_json import JSON, JSONDict
@@ -76,7 +78,7 @@ def _prepare_main(
         },
     )
     monkeypatch.setattr(servant_app, "discover_modules", lambda: {})
-    ctx = servant_app.GlobalContext()
+    ctx = GlobalContext()
     ctx.guild_retention.ready.set()
     ctx.channel_controls.loaded = True
     monkeypatch.setattr(servant_app, "GlobalContext", lambda: ctx)
@@ -100,6 +102,56 @@ def _prepare_main(
     handle_message = AsyncMock()
     monkeypatch.setattr(servant_app, "handle_incoming_message", handle_message)
     return openai_client, handle_message, record_message
+
+
+@pytest.mark.parametrize("reply_opted_out", [False, True])
+def test_image_only_dm_and_reply_images_reach_model_context(
+    monkeypatch: pytest.MonkeyPatch, reply_opted_out: bool
+) -> None:
+    _, handle_message, _ = _prepare_main(monkeypatch, message_content=False)
+    monkeypatch.setattr(discord.Client, "user", property(lambda _self: SimpleNamespace(id=123, name="Vox")))
+    monkeypatch.setattr(discord.Client, "close", AsyncMock())
+    image_url = "https://cdn.discordapp.com/attachments/10/20/image.png"
+    reply_url = "https://cdn.discordapp.com/attachments/10/21/reply.jpg"
+
+    async def start(client: discord.Client, _token: str, *, reconnect: bool) -> None:
+        ctx = getattr(servant_app, "GlobalContext")()
+        if reply_opted_out:
+            ctx.privacy.opted_out_users.add("88")
+        referenced = SimpleNamespace(
+            id=21,
+            author=SimpleNamespace(id=88, name="Bob"),
+            guild=None,
+            content="reference",
+            attachments=[SimpleNamespace(content_type="image/jpeg", size=200, url=reply_url)],
+        )
+        monkeypatch.setattr(client, "_get_referenced_message", AsyncMock(return_value=referenced))
+        message = SimpleNamespace(
+            id=20,
+            author=SimpleNamespace(id=42, name="Alice"),
+            guild=None,
+            channel=SimpleNamespace(id=10),
+            content="",
+            reference=SimpleNamespace(message_id=21),
+            attachments=[
+                SimpleNamespace(content_type="image/png", size=100, url=image_url),
+                SimpleNamespace(content_type="application/pdf", size=100, url="https://example.com/file.pdf"),
+                SimpleNamespace(content_type="image/png", size=21 * 1024 * 1024, url="https://example.com/large.png"),
+            ],
+        )
+        await getattr(client, "on_message")(message)
+        cached = ctx.channel_messages["10"][-1]
+        restored = servant_app._message_from_json(cached)
+        assert restored is not None
+        content = restored.get("content")
+        assert isinstance(content, list)
+        urls = [part["image_url"]["url"] for part in content if part["type"] == "image_url"]
+        assert urls == ([image_url] if reply_opted_out else [image_url, reply_url])
+        assert ("reference" in str(content)) is not reply_opted_out
+
+    monkeypatch.setattr(discord.Client, "start", start)
+    asyncio.run(servant_app.main())
+    handle_message.assert_awaited_once()
 
 
 @pytest.mark.parametrize(
@@ -425,8 +477,8 @@ def test_server_removal_and_ready_reconciliation_are_wired(monkeypatch: pytest.M
     _prepare_main(monkeypatch)
     remove = AsyncMock()
     reconcile = AsyncMock()
-    monkeypatch.setattr(servant_app.guild_retention, "remove_guild", remove)
-    monkeypatch.setattr(servant_app.guild_retention, "reconcile", reconcile)
+    monkeypatch.setattr(guild_retention, "remove_guild", remove)
+    monkeypatch.setattr(guild_retention, "reconcile", reconcile)
     monkeypatch.setattr(discord.Client, "close", AsyncMock())
     guild = SimpleNamespace(id=321, channels=[SimpleNamespace(id=10)], threads=[SimpleNamespace(id=11)])
 

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Wabbit-Public-Test-License-1.1
 from __future__ import annotations
 
 import asyncio

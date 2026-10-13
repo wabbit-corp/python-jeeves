@@ -17,8 +17,7 @@
 #                 'properties': {
 #                     'personality': {
 #                         'type': 'string',
-#                         # FIXME
-#                         'description': 'The name of the personality to switch to. Available personalities: Jeeves, Fumiko, Dio Brando.'
+#  #                         'description': 'The name of the personality to switch to. Available personalities: Jeeves, Fumiko, Dio Brando.'
 #                     }
 #                 },
 #                 'required': ['personality']

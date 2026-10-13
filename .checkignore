@@ -1,0 +1,36 @@
+# The compatibility runner is generated tooling with embedded parser fixtures.
+/check.py
+# Imported joke corpus: third-party prose, not source or credential material.
+/servant/modules/reddit_jokes/reddit_jokes.json
+# Virtual environments and QA output are local tooling artifacts.
+/.venv
+/.venv/
+/.coverage*
+/.import_linter_cache/
+
+# Published API endpoints, documentation links, and public Discord resource URLs.
+check:ignore E_HARDCODED_URL pyproject.toml
+check:ignore E_HARDCODED_URL servant_app.py
+check:ignore E_HARDCODED_URL servant/channel_controls.py
+check:ignore E_HARDCODED_URL servant/api/bravesearch.py
+check:ignore E_HARDCODED_URL servant/scripts/check_external_apis.py
+check:ignore E_HARDCODED_URL servant/modules/imgflip.py
+check:ignore E_HARDCODED_URL servant/modules/background_indexer.py
+check:ignore E_HARDCODED_URL servant/modules/weather.py
+check:ignore E_HARDCODED_URL servant/modules/event_channels.py
+check:ignore E_HARDCODED_URL servant/modules/indexed_message_search.py
+check:ignore E_HARDCODED_URL servant/modules/wikipedia.py
+# Browser user-agent fixture and Discord snowflake IDs are public values.
+check:ignore E_HIGH_ENTROPY_STRING servant/scripts/check_external_apis.py
+check:ignore E_HIGH_ENTROPY_STRING tests/test_event_channels.py
+# Voice receive is prerelease; SQLCipher remains on its compatible minor series.
+check:ignore E_UNPINNED_DEPENDENCY requirements.txt dep=discord-ext-voice-recv>=0.5.2a179,<0.6.0
+check:ignore E_UNPINNED_DEPENDENCY requirements.txt dep=sqlcipher3>=0.6.2,<0.7.0
+
+# Legacy banner alias remains for older repository consumers.
+check:ignore E_DUPLICATE_FILE .banner.png
+
+# These optional integrations are loaded dynamically or through Discord's namespace.
+check:ignore E_PYQA_DEPTRY pyproject.toml value='crawl4ai' defined
+check:ignore E_PYQA_DEPTRY pyproject.toml value='discord-ext-voice-recv' defined
+check:ignore E_HARDCODED_URL pyproject.extra.toml

@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
-from types import SimpleNamespace
 from unittest.mock import MagicMock
 
+import discord
 import legacy_conversation_schema
 import pytest
 
-from servant import database, guild_retention, voice_transcriber
+from servant import channel_controls, database, guild_retention, voice_transcriber
 from servant.defs import GlobalContext, Personality
 from servant.modules import (
     background_indexer,
@@ -195,7 +195,13 @@ def test_stale_writes_and_child_records_cannot_restore_deleted_guild(tmp_path: P
 def test_offline_removal_and_unavailable_member_guild(tmp_path: Path) -> None:
     ctx = _ctx(tmp_path)
     _seed(ctx)
-    asyncio.run(guild_retention.reconcile(ctx, lambda: [SimpleNamespace(id=2, unavailable=True)]))
+    asyncio.run(
+        guild_retention.reconcile(
+            ctx,
+            lambda: [MagicMock(spec=discord.Guild, id=2, unavailable=True)],
+            restore_channel_policy=channel_controls.load,
+        )
+    )
     _assert_deleted(ctx)
     assert ctx.guild_retention.ready.is_set()
     # A temporarily unavailable guild remains installed, so retain all its rows.
@@ -225,7 +231,13 @@ def test_partial_failure_is_journaled_and_retried_after_restart(
         conn.close()
     monkeypatch.setattr(guild_retention, "_purge", purge)
     restarted = _ctx(tmp_path)
-    asyncio.run(guild_retention.reconcile(restarted, lambda: [SimpleNamespace(id=2)]))
+    asyncio.run(
+        guild_retention.reconcile(
+            restarted,
+            lambda: [MagicMock(spec=discord.Guild, id=2, unavailable=False)],
+            restore_channel_policy=channel_controls.load,
+        )
+    )
     _assert_deleted(restarted)
 
 
@@ -256,10 +268,14 @@ def test_remove_cancels_processing_and_voice_buffers(tmp_path: Path) -> None:
         ctx = _ctx(tmp_path)
         _seed(ctx)
         manager = voice_transcriber.VoiceTranscriberManager(ctx)
-        transcriber = SimpleNamespace(_buffers={42: b"voice"}, stop=MagicMock())
+        transcriber = MagicMock(spec=voice_transcriber.VoiceTranscriber, _buffers={42: b"voice"})
         manager._transcribers[1] = transcriber
         ctx.module_state["voice_transcriber"] = manager
-        work = asyncio.create_task(asyncio.Event().wait())
+
+        async def wait() -> None:
+            await asyncio.Event().wait()
+
+        work = asyncio.create_task(wait())
         ctx.privacy.processing_tasks.add(work)
         await guild_retention.remove_guild(ctx, "1")
         assert work.cancelled()
@@ -308,7 +324,13 @@ def test_failed_transcript_cleanup_is_retried_even_after_database_deletion(
         conn.close()
     monkeypatch.setattr(voice_transcriber, "purge_guild_transcripts", original)
     restarted = _ctx(tmp_path)
-    asyncio.run(guild_retention.reconcile(restarted, lambda: [SimpleNamespace(id=2)]))
+    asyncio.run(
+        guild_retention.reconcile(
+            restarted,
+            lambda: [MagicMock(spec=discord.Guild, id=2, unavailable=False)],
+            restore_channel_policy=channel_controls.load,
+        )
+    )
     _assert_deleted(restarted)
 
 
@@ -367,7 +389,13 @@ def test_legacy_reminder_ownership_is_recovered_before_offline_cleanup(tmp_path:
         conn.commit()
     finally:
         conn.close()
-    asyncio.run(guild_retention.reconcile(ctx, lambda: [SimpleNamespace(id=2)]))
+    asyncio.run(
+        guild_retention.reconcile(
+            ctx,
+            lambda: [MagicMock(spec=discord.Guild, id=2, unavailable=False)],
+            restore_channel_policy=channel_controls.load,
+        )
+    )
     _assert_deleted(ctx)
     conn = database.connect(commitment._db_path(ctx))
     try:
@@ -402,7 +430,7 @@ def test_voice_append_cannot_restore_a_file_after_removal_and_rejoin(tmp_path: P
         transcriber._append_line_sync(path, "stale text", generation)
         assert not path.exists()
         transcriber.stop()
-        transcriber.enqueue_audio(SimpleNamespace(id=42), b"old audio")
+        transcriber.enqueue_audio(MagicMock(spec=discord.User, id=42), b"old audio")
         assert not transcriber._buffers
 
     asyncio.run(run())

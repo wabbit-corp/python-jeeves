@@ -17,7 +17,7 @@ from pathlib import Path
 import discord
 from openai import AsyncOpenAI
 
-from servant import channel_controls
+from servant import channel_policy as channel_controls
 from servant.defs import GlobalContext
 from typed_json import coerce_str
 
@@ -246,7 +246,7 @@ class VoiceTranscriber:
             await task
         except asyncio.CancelledError:
             current = asyncio.current_task()
-            if current is not None and current.cancelling():
+            if current is not None and getattr(current, "cancelling", lambda: 1)():
                 raise
         finally:
             self._ctx.privacy.processing_tasks.discard(task)

@@ -10,9 +10,7 @@ from typing import TYPE_CHECKING, TypeAlias
 
 from openai import AsyncOpenAI
 
-from servant.channel_controls import ChannelControlsState
-from servant.guild_retention import GuildRetentionState
-from servant.privacy import PrivacyState
+from servant.runtime_state import ChannelControlsState, GuildRetentionState, PrivacyState
 from typed_json import JSON, JSONDict
 
 if TYPE_CHECKING:

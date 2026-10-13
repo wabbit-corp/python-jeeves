@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Wabbit-Public-Test-License-1.1
 import asyncio
 
 from hypothesis import given

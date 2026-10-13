@@ -4,14 +4,16 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import threading
-from collections.abc import Callable, Iterable
+from collections.abc import Awaitable, Callable, Iterable
 from contextlib import closing
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from servant import database
+from servant.runtime_state import GuildRetentionState as GuildRetentionState
+from servant.storage_schema import _quote as _quote
+from servant.storage_schema import _tables as _tables
+from servant.storage_schema import init_retention_schema as init_schema
 
 if TYPE_CHECKING:
     import discord
@@ -19,69 +21,6 @@ if TYPE_CHECKING:
     from servant.defs import GlobalContext
 
 _LOGGER = logging.getLogger(__name__)
-
-
-@dataclass
-class GuildRetentionState:
-    removed_guilds: set[str] = field(default_factory=set)
-    removed_channels: set[str] = field(default_factory=set)
-    lock: asyncio.Lock = field(default_factory=asyncio.Lock)
-    ready: asyncio.Event = field(default_factory=asyncio.Event)
-    transcript_lock: threading.Lock = field(default_factory=threading.Lock)
-
-
-def _quote(identifier: str) -> str:
-    return '"' + identifier.replace('"', '""') + '"'
-
-
-def _tables(conn: database.Connection) -> dict[str, set[str]]:
-    return {
-        str(row[0]): {str(col[1]) for col in conn.execute(f"PRAGMA table_info({_quote(str(row[0]))})")}
-        for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
-        if not str(row[0]).startswith(("sqlite_", "retention_", "privacy_"))
-    }
-
-
-def init_schema(conn: database.Connection) -> None:
-    from servant import channel_controls
-
-    channel_controls.init_schema(conn)
-    # These contain identifiers only, never content. They also journal unfinished cleanup.
-    conn.execute(
-        "CREATE TABLE IF NOT EXISTS retention_removed_guilds (guild_id TEXT PRIMARY KEY, pending INTEGER NOT NULL DEFAULT 1)"
-    )
-    conn.execute(
-        "CREATE TABLE IF NOT EXISTS retention_removed_channels (channel_id TEXT PRIMARY KEY, guild_id TEXT NOT NULL)"
-    )
-    tables = _tables(conn)
-    for table, columns in tables.items():
-        conditions: list[str] = []
-        signature = 0
-        if "guild_id" in columns:
-            signature += 1
-            conditions.append("EXISTS (SELECT 1 FROM retention_removed_guilds WHERE guild_id=NEW.guild_id)")
-        for column in ("channel_id", "parent_channel_id"):
-            if column in columns:
-                signature += 2 if column == "channel_id" else 4
-                conditions.append(f"EXISTS (SELECT 1 FROM retention_removed_channels WHERE channel_id=NEW.{column})")
-        if table.startswith("message_") and "message_id" in columns and "messages" in tables:
-            signature += 8
-            conditions.append("NOT EXISTS (SELECT 1 FROM messages WHERE message_id=NEW.message_id)")
-        if not conditions:
-            continue
-        for operation in ("INSERT", "UPDATE"):
-            conn.execute(
-                f"CREATE TRIGGER IF NOT EXISTS {_quote(f'retention_{table}_{operation.lower()}_{signature}')} "
-                f"BEFORE {operation} ON {_quote(table)} WHEN {' OR '.join(conditions)} "
-                "BEGIN SELECT RAISE(IGNORE); END"
-            )
-
-
-def guild_is_removed(conn: database.Connection, guild_id: str | None) -> bool:
-    return (
-        guild_id is not None
-        and conn.execute("SELECT 1 FROM retention_removed_guilds WHERE guild_id=?", (guild_id,)).fetchone() is not None
-    )
 
 
 def _paths(ctx: GlobalContext) -> tuple[Path, ...]:
@@ -343,7 +282,12 @@ def _stored_guilds(ctx: GlobalContext, ownership: dict[str, str]) -> tuple[set[s
     return stored, pending
 
 
-async def reconcile(ctx: GlobalContext, guilds: Callable[[], Iterable[discord.Guild]]) -> None:
+async def reconcile(
+    ctx: GlobalContext,
+    guilds: Callable[[], Iterable[discord.Guild]],
+    *,
+    restore_channel_policy: Callable[[GlobalContext], Awaitable[None]],
+) -> None:
     """Call only after READY: unavailable guilds remain members and must be kept."""
     ownership = {
         str(channel.id): str(guild.id)
@@ -362,9 +306,7 @@ async def reconcile(ctx: GlobalContext, guilds: Callable[[], Iterable[discord.Gu
             return gid in {str(g.id) for g in guilds()}
 
         await allow_guild(ctx, guild_id, still_installed=still_installed)
-    from servant import channel_controls
-
-    await channel_controls.load(ctx)
+    await restore_channel_policy(ctx)
     ctx.guild_retention.ready.set()
 
 

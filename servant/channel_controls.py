@@ -5,10 +5,14 @@ from __future__ import annotations
 import asyncio
 import logging
 from contextlib import closing
-from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from servant import database
+from servant.channel_policy import allows_channel as allows_channel
+from servant.channel_policy import allows_guild as allows_guild
+from servant.channel_policy import is_allowed as is_allowed
+from servant.runtime_state import ChannelControlsState as ChannelControlsState
+from servant.storage_schema import init_channel_schema as init_schema
 
 if TYPE_CHECKING:
     from servant.defs import GlobalContext
@@ -16,91 +20,6 @@ if TYPE_CHECKING:
 _LOGGER = logging.getLogger(__name__)
 POLICY_URL = "https://github.com/wabbit-corp/python-jeeves/blob/master/PRIVACY.md"
 PRIVACY_CONTACT = "wabbit@wabbit.one"
-
-
-@dataclass
-class ChannelControlsState:
-    disabled: dict[str, str] = field(default_factory=dict)
-    loaded: bool = False
-
-
-def is_allowed(ctx: GlobalContext, channel_id: str, guild_id: str | None) -> bool:
-    if channel_id in ctx.guild_retention.removed_channels or channel_id in ctx.channel_controls.disabled:
-        return False
-    if guild_id is None:
-        return True  # DMs sent directly to Vox retain their existing behavior.
-    return ctx.channel_controls.loaded and guild_id not in ctx.guild_retention.removed_guilds
-
-
-def allows_channel(ctx: GlobalContext, channel: object) -> bool:
-    guild = getattr(channel, "guild", None)
-    channel_id = getattr(channel, "id", None)
-    return channel_id is not None and is_allowed(ctx, str(channel_id), str(guild.id) if guild else None)
-
-
-def allows_guild(ctx: GlobalContext, guild_id: str) -> bool:
-    return ctx.channel_controls.loaded and guild_id not in ctx.guild_retention.removed_guilds
-
-
-def init_schema(conn: database.Connection) -> None:
-    conn.execute(
-        "CREATE TABLE IF NOT EXISTS privacy_channel_controls ("
-        "channel_id TEXT PRIMARY KEY, guild_id TEXT NOT NULL, allowed INTEGER NOT NULL, pending INTEGER NOT NULL)"
-    )
-    conn.execute("CREATE TABLE IF NOT EXISTS privacy_channel_mode (id INTEGER PRIMARY KEY CHECK(id=1))")
-    # Replace the previous allowlist guards. Otherwise they continue denying new
-    # channels even after the runtime changes to default-enabled behavior.
-    for row in conn.execute(
-        "SELECT name FROM sqlite_master WHERE type='trigger' AND name GLOB 'privacy_channel_*'"
-    ).fetchall():
-        name = str(row[0])
-        if "_default_allow_v1_" not in name:
-            quoted_name = '"' + name.replace('"', '""') + '"'
-            conn.execute(f"DROP TRIGGER {quoted_name}")
-    # Enable enforcement when the running application's startup loads its policy.
-    # Existing migrations and offline schema inspection can still open a database.
-    tables = [
-        str(row[0])
-        for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
-        if not str(row[0]).startswith(("sqlite_", "retention_", "privacy_"))
-    ]
-    for table in tables:
-        quoted_table = '"' + table.replace('"', '""') + '"'
-        columns = {str(col[1]) for col in conn.execute(f"PRAGMA table_info({quoted_table})")}
-        conditions = []
-        for column in ("channel_id", "parent_channel_id"):
-            if column not in columns:
-                continue
-            conditions.append(
-                f"EXISTS (SELECT 1 FROM privacy_channel_controls WHERE channel_id=NEW.{column} AND (allowed=0 OR pending=1))"
-            )
-            if "guild_id" in columns:
-                conditions.append(
-                    f"(NEW.guild_id IS NOT NULL AND EXISTS (SELECT 1 FROM privacy_channel_controls "
-                    f"WHERE channel_id=NEW.{column} AND guild_id!=NEW.guild_id))"
-                )
-                conditions.append(
-                    f"(NEW.guild_id IS NULL AND EXISTS(SELECT 1 FROM privacy_channel_controls "
-                    f"WHERE channel_id=NEW.{column}))"
-                )
-                if "channels" in tables:
-                    conditions.append(
-                        f"(NEW.guild_id IS NULL AND EXISTS(SELECT 1 FROM channels "
-                        f"WHERE channel_id=NEW.{column} AND guild_id IS NOT NULL))"
-                    )
-        if not conditions:
-            continue
-        for operation in ("INSERT", "UPDATE"):
-            name = (
-                '"'
-                + f"privacy_channel_{table}_{operation.lower()}_default_allow_v1_{len(conditions)}".replace('"', '""')
-                + '"'
-            )
-            conn.execute(
-                f"CREATE TRIGGER IF NOT EXISTS {name} BEFORE {operation} ON {quoted_table} "
-                f"WHEN EXISTS(SELECT 1 FROM privacy_channel_mode) AND ({' OR '.join(conditions)}) "
-                "BEGIN SELECT RAISE(IGNORE); END"
-            )
 
 
 def _store(ctx: GlobalContext, channel_id: str, guild_id: str, *, allowed: bool, pending: bool) -> None:
@@ -205,13 +124,20 @@ async def load(ctx: GlobalContext) -> None:
                 conn.executemany("INSERT INTO privacy_channel_controls VALUES (?,?,?,?)", rows)
         return rows
 
-    ctx.channel_controls.loaded = False
-    async with ctx.guild_retention.lock:
-        rows = await asyncio.to_thread(restore)
-        ctx.channel_controls.disabled = {cid: gid for cid, gid, allowed, pending in rows if not allowed or pending}
-    for channel_id, guild_id, _allowed, pending in rows:
-        if pending:
-            await disable(ctx, channel_id, guild_id)
+    # Keep the last loaded policy available during routine reconciliation.
+    # Resetting readiness here silently drops incoming server messages on every tick.
+    # Initial startup stays closed through the state's default; failed refreshes
+    # also close processing until a later successful restore.
+    try:
+        async with ctx.guild_retention.lock:
+            rows = await asyncio.to_thread(restore)
+            ctx.channel_controls.disabled = {cid: gid for cid, gid, allowed, pending in rows if not allowed or pending}
+        for channel_id, guild_id, _allowed, pending in rows:
+            if pending:
+                await disable(ctx, channel_id, guild_id)
+    except BaseException:
+        ctx.channel_controls.loaded = False
+        raise
     ctx.channel_controls.loaded = True
     _LOGGER.info(
         "Loaded %s disabled Vox channels; other channels are enabled by default", len(ctx.channel_controls.disabled)

@@ -1,0 +1,9 @@
+# Vox's existing QA baseline is 15% branch coverage (see CHANGELOG.md).
+# pytest is the authoritative suite; the generic unittest runner targets dev/.
+[tool.wabbit-dev.qa]
+coverage_fail_under = 15
+run_unittest = false
+# Crawl4AI imports NLTK. Vox does not call the affected model import/export APIs,
+# expose model paths, or rely on NLTK pathsec. No upstream patched version exists.
+# https://github.com/advisories/GHSA-8mgp-746c-j5xp
+ignored_advisories = ["PYSEC-2026-3740"]

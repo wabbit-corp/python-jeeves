@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Wabbit-Public-Test-License-1.1
 import asyncio
 import datetime as dt
 from pathlib import Path

@@ -9,8 +9,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TypeVar
 
-from servant import channel_controls, permissions, privacy
+from servant import channel_policy as channel_controls
 from servant import database as sqlite3
+from servant import permissions, privacy
 from servant.defs import GlobalContext, RoutineTask, ToolDef
 from typed_json import JSON, JSONDict, coerce_int, coerce_str
 
@@ -96,14 +97,12 @@ def _commitments_has_rows_matching(
 
 
 def _commitments_need_migration(conn: sqlite3.Connection) -> bool:
-    table_row = conn.execute(
-        """
+    table_row = conn.execute("""
         SELECT 1
         FROM sqlite_master
         WHERE type = 'table' AND name = 'commitments'
         LIMIT 1
-        """
-    ).fetchone()
+        """).fetchone()
     if table_row is None:
         return True
 
@@ -175,14 +174,12 @@ def _require_int(obj: JSONDict, key: str) -> int:
 
 
 def _migrate_timestamp_columns(conn: sqlite3.Connection) -> None:
-    rows = conn.execute(
-        """
+    rows = conn.execute("""
         SELECT rowid AS _rowid, created_at, updated_at
         FROM commitments
         WHERE (created_at IS NOT NULL AND typeof(created_at) IN ('text', 'real'))
            OR (updated_at IS NOT NULL AND typeof(updated_at) IN ('text', 'real'))
-        """
-    ).fetchall()
+        """).fetchall()
 
     for row in rows:
         rowid = row["_rowid"] if "_rowid" in row.keys() else None
@@ -268,8 +265,7 @@ def _ensure_commitments_columns(conn: sqlite3.Connection) -> None:
 
 
 def _init_db(conn: sqlite3.Connection) -> None:
-    conn.execute(
-        """
+    conn.execute("""
         CREATE TABLE IF NOT EXISTS commitments (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL,
@@ -286,14 +282,13 @@ def _init_db(conn: sqlite3.Connection) -> None:
             created_at INTEGER NOT NULL,            -- epoch ms
             updated_at INTEGER NOT NULL             -- epoch ms
         );
-        """
-    )
+        """)
     conn.execute("CREATE INDEX IF NOT EXISTS idx_commitments_active_channel ON commitments(status, channel_id);")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_commitments_user ON commitments(user_id);")
-    from servant import guild_retention
+    from servant import storage_schema
 
     _ensure_commitments_columns(conn)
-    guild_retention.init_schema(conn)
+    storage_schema.init_retention_schema(conn)
     _migrate_timestamp_columns(conn)
     conn.commit()
 

@@ -3,30 +3,18 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 import discord
 
 from servant import database as sqlite3
+from servant.runtime_state import PrivacyState as PrivacyState
 
 if TYPE_CHECKING:
     from servant.defs import GlobalContext
 
 _LOGGER = logging.getLogger(__name__)
 ConfirmOptOut = Callable[[str], Awaitable[None]]
-
-
-@dataclass
-class PrivacyState:
-    opted_out_users: set[str] = field(default_factory=set)
-    pending_opt_outs: set[str] = field(default_factory=set)
-    generation: int = 0
-    lock: asyncio.Lock = field(default_factory=asyncio.Lock)
-    processing_tasks: set[asyncio.Task[None]] = field(default_factory=set)
-
-    def is_opted_out(self, user_id: str | int) -> bool:
-        return str(user_id) in self.opted_out_users
 
 
 def init_schema(conn: sqlite3.Connection) -> None:
@@ -37,8 +25,7 @@ def init_schema(conn: sqlite3.Connection) -> None:
         "CREATE TABLE IF NOT EXISTS privacy_excluded_messages (message_id TEXT PRIMARY KEY, user_id TEXT NOT NULL)"
     )
     for operation in ("INSERT", "UPDATE"):
-        conn.execute(
-            f"""
+        conn.execute(f"""
             CREATE TRIGGER IF NOT EXISTS privacy_messages_{operation.lower()}
             BEFORE {operation} ON messages
             WHEN EXISTS (SELECT 1 FROM privacy_opt_outs WHERE user_id = NEW.author_id)
@@ -48,17 +35,14 @@ def init_schema(conn: sqlite3.Connection) -> None:
                     SELECT NEW.message_id, NEW.author_id WHERE NEW.author_id IS NOT NULL;
                 SELECT RAISE(IGNORE);
             END
-            """
-        )
+            """)
         for table in ("users", "guild_members", "guild_member_roles", "llm_request_events"):
-            conn.execute(
-                f"""
+            conn.execute(f"""
                 CREATE TRIGGER IF NOT EXISTS privacy_{table}_{operation.lower()}
                 BEFORE {operation} ON {table}
                 WHEN EXISTS (SELECT 1 FROM privacy_opt_outs WHERE user_id = NEW.user_id)
                 BEGIN SELECT RAISE(IGNORE); END
-                """
-            )
+                """)
         for table in (
             "message_attachments",
             "message_embeds",
@@ -72,14 +56,12 @@ def init_schema(conn: sqlite3.Connection) -> None:
                 if table == "message_user_mentions"
                 else ""
             )
-            conn.execute(
-                f"""
+            conn.execute(f"""
                 CREATE TRIGGER IF NOT EXISTS privacy_{table}_{operation.lower()}
                 BEFORE {operation} ON {table}
                 WHEN EXISTS (SELECT 1 FROM privacy_excluded_messages WHERE message_id = NEW.message_id) {extra}
                 BEGIN SELECT RAISE(IGNORE); END
-                """
-            )
+                """)
 
 
 def confirm_in_database(conn: sqlite3.Connection, user_id: str, now_ms: int) -> None:
@@ -120,14 +102,12 @@ def block_feature_records(conn: sqlite3.Connection, user_id: str, *, tables: tup
     conn.execute("INSERT OR IGNORE INTO privacy_blocked_users VALUES (?)", (user_id,))
     for table in tables:
         for operation in ("INSERT", "UPDATE"):
-            conn.execute(
-                f"""
+            conn.execute(f"""
                 CREATE TRIGGER IF NOT EXISTS privacy_{table}_{operation.lower()}
                 BEFORE {operation} ON {table}
                 WHEN EXISTS (SELECT 1 FROM privacy_blocked_users WHERE user_id = NEW.user_id)
                 BEGIN SELECT RAISE(IGNORE); END
-                """
-            )
+                """)
         conn.execute(f"DELETE FROM {table} WHERE user_id = ?", (user_id,))
 
 

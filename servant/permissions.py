@@ -6,7 +6,7 @@ from pathlib import Path
 
 import discord
 
-from servant import channel_controls
+from servant import channel_policy as channel_controls
 from servant import database as sqlite3
 from servant.defs import GlobalContext, RequestContext
 from typed_json import coerce_str

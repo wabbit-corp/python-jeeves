@@ -243,7 +243,7 @@ async def _resolve_family(host: str, port: int, family: int) -> tuple[str, ...]:
         return ()
     addrs: list[str] = []
     for info in infos:
-        addr = info[4][0]
+        addr = str(info[4][0])
         if family == socket.AF_INET6 and _is_ipv4_mapped(addr):
             continue
         if addr not in addrs:

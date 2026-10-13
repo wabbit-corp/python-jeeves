@@ -13,8 +13,9 @@ from typing import Protocol, TypeVar
 
 import discord
 
-from servant import channel_controls, permissions, privacy
+from servant import channel_policy as channel_controls
 from servant import database as sqlite3
+from servant import permissions, privacy
 from servant.defs import GlobalContext, ToolDef
 from typed_json import JSON, JSONDict, coerce_float, coerce_int, coerce_str
 
@@ -66,8 +67,7 @@ def _connect(dbfile: Path) -> sqlite3.Connection:
 
 
 def _init_db(conn: sqlite3.Connection) -> None:
-    conn.execute(
-        """
+    conn.execute("""
         CREATE TABLE IF NOT EXISTS topic_subscriptions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id TEXT NOT NULL,
@@ -80,18 +80,15 @@ def _init_db(conn: sqlite3.Connection) -> None:
             created_at INTEGER NOT NULL,
             updated_at INTEGER NOT NULL
         );
-        """
-    )
-    conn.execute(
-        """
+        """)
+    conn.execute("""
         CREATE TABLE IF NOT EXISTS topic_notification_cooldowns (
             user_id TEXT NOT NULL,
             channel_id TEXT NOT NULL,
             last_notified_at INTEGER NOT NULL,
             PRIMARY KEY (user_id, channel_id)
         );
-        """
-    )
+        """)
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_topic_subscriptions_guild_active ON topic_subscriptions(status, guild_id);"
     )
@@ -99,9 +96,9 @@ def _init_db(conn: sqlite3.Connection) -> None:
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_topic_notifications_channel ON topic_notification_cooldowns(channel_id);"
     )
-    from servant import guild_retention
+    from servant import storage_schema
 
-    guild_retention.init_schema(conn)
+    storage_schema.init_retention_schema(conn)
     conn.commit()
 
 

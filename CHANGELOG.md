@@ -34,6 +34,8 @@ The entries below are derived from the git history and grouped by release date.
 - Archived and removed the unused offline model-training and annotation applications, sample corpora, and their dependencies. Current Discord tools and scheduled features remain available; privacy cleanup still removes legacy conversation records.
 
 ### Changed
+- Restored the shared QA environment, explicit test package resolution, documented 15% coverage baseline, and pytest-only execution. Updated development tool minimums for security fixes, corrected type errors and formatting, removed unused dependencies, and documented the unreachable NLTK advisory exception.
+- Shared channel-policy queries, state, and database guards now live in independent modules; server reconciliation receives its channel-policy loader explicitly, removing import cycles without changing privacy enforcement.
 - Vox's production diagnostic journal and temporary exports now use bounded memory storage, with deployment templates preserving the journal namespace and isolated tmpfs mounts.
 - Removed production plaintext databases, retired artifacts, and historical journal files after verifying all 93 files in a local recovery archive; retained server recovery archives and host swap are encrypted. Updated the public privacy policy to describe verified storage protections.
 - Deployed Vox's privacy controls and SQLCipher databases on October 8, 2026, preserving the original databases and verified local rollback snapshots; privacy and deletion contact is now `wabbit@wabbit.one`. The service allows up to 256 MiB of locked memory for SQLCipher's protected allocations. The in-app privacy panel leads with moderator controls and reports the current channel setting.
@@ -57,7 +59,11 @@ The entries below are derived from the git history and grouped by release date.
 - Voice transcriber now disconnects after 60 seconds with no non-bot members in the channel.
 - Voice transcription defaults now chunk faster (shorter silence and max segment thresholds).
 ### Fixed
+- Discord image attachments now reach Vox's conversational model, including image-only DMs and permitted reply images; expired attachment URLs are excluded from older cached context.
+- Missing English/translatable YouTube captions now return a useful unavailable result instead of constructing an invalid library exception. Transcript network requests run outside the Discord event loop.
+- Startup timestamp migration skips canonical values in legacy TEXT columns and records completion, avoiding repeated rewrites of the message archive on every restart.
 - Vox replies now use numeric Discord user mentions without internal username suffixes. Author metadata and prompt instructions use the valid syntax, and outgoing replies and cached assistant context normalize legacy labelled mentions before message splitting.
+- Routine channel-policy refreshes no longer temporarily disable all server message handling. Previously loaded restrictions remain enforced while refreshing; startup and failed refreshes still pause server processing until a policy loads successfully.
 - Actual Discord mentions now invoke Vox by its account ID, independently of the account or personality name; v/vox aliases remain available across personalities, and failed mention lookups no longer prevent replies.
 - Cross-user commitment lookups now default to the active request channel and reuse the current request guild context, so guild staff/owners can resolve and cancel another user's commitment without redundant channel metadata.
 - Routine tasks now wait for Discord readiness, and dispatch helpers bind the active loop before startup work begins, avoiding first-boot reminder/event task failures during deployment.

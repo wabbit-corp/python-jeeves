@@ -13,8 +13,9 @@ from dateutil import tz
 from dateutil.parser import isoparse
 from defusedxml import ElementTree as ET
 
-from servant import channel_controls, permissions
+from servant import channel_policy as channel_controls
 from servant import database as sqlite3
+from servant import permissions
 from servant.defs import (
     SECRET_USER_AGENT,
     GlobalContext,
@@ -86,8 +87,7 @@ def _connect(dbfile: Path) -> sqlite3.Connection:
 
 
 def _init_db(conn: sqlite3.Connection) -> None:
-    conn.execute(
-        """
+    conn.execute("""
         CREATE TABLE IF NOT EXISTS event_channel_subscriptions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             guild_id TEXT NOT NULL,
@@ -105,10 +105,8 @@ def _init_db(conn: sqlite3.Connection) -> None:
             updated_at INTEGER NOT NULL,
             last_checked_at INTEGER NOT NULL DEFAULT 0
         );
-        """
-    )
-    conn.execute(
-        """
+        """)
+    conn.execute("""
         CREATE TABLE IF NOT EXISTS event_channel_seen_items (
             subscription_id INTEGER NOT NULL,
             item_id TEXT NOT NULL,
@@ -117,8 +115,7 @@ def _init_db(conn: sqlite3.Connection) -> None:
             PRIMARY KEY (subscription_id, item_id),
             FOREIGN KEY(subscription_id) REFERENCES event_channel_subscriptions(id) ON DELETE CASCADE
         );
-        """
-    )
+        """)
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_event_channel_subscriptions_active_due "
         "ON event_channel_subscriptions(status, last_checked_at);"
@@ -130,9 +127,9 @@ def _init_db(conn: sqlite3.Connection) -> None:
         "CREATE INDEX IF NOT EXISTS idx_event_channel_seen_items_ts "
         "ON event_channel_seen_items(subscription_id, item_ts);"
     )
-    from servant import guild_retention
+    from servant import storage_schema
 
-    guild_retention.init_schema(conn)
+    storage_schema.init_retention_schema(conn)
     conn.commit()
 
 

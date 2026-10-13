@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Wabbit-Public-Test-License-1.1
 from __future__ import annotations
 
 import sqlite3 as plaintext_sqlite
@@ -86,8 +87,7 @@ def test_migration_preserves_schema_data_metadata_and_wal(tmp_path: Path) -> Non
     destination = tmp_path / "encrypted.db"
     source_conn = plaintext_sqlite.connect(source)
     source_conn.execute("PRAGMA journal_mode=WAL")
-    source_conn.executescript(
-        """
+    source_conn.executescript("""
         PRAGMA user_version=17;
         PRAGMA application_id=42;
         CREATE TABLE messages (id INTEGER PRIMARY KEY AUTOINCREMENT, content TEXT);
@@ -99,8 +99,7 @@ def test_migration_preserves_schema_data_metadata_and_wal(tmp_path: Path) -> Non
         CREATE VIRTUAL TABLE search USING fts5(content);
         INSERT INTO messages(content) VALUES ('retain my message');
         INSERT INTO search VALUES ('retain my message');
-        """
-    )
+        """)
     try:
         encrypt_database(source, destination)
         assert source_conn.execute("SELECT content FROM messages").fetchone()[0] == "retain my message"

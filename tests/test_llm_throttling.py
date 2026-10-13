@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Wabbit-Public-Test-License-1.1
 from __future__ import annotations
 
 import asyncio
@@ -119,13 +120,11 @@ def _event_rows(db_path: Path) -> list[sqlite3.Row]:
     conn = sqlite3.connect(str(db_path))
     conn.row_factory = sqlite3.Row
     try:
-        rows = conn.execute(
-            """
+        rows = conn.execute("""
             SELECT user_id, message_id, applied_reasoning_effort, throttled
             FROM llm_request_events
             ORDER BY id
-            """
-        ).fetchall()
+            """).fetchall()
         return list(rows)
     finally:
         conn.close()
@@ -138,13 +137,11 @@ def test_default_policy_seed_is_documented_shape(tmp_path: Path) -> None:
     conn = sqlite3.connect(str(db_path))
     conn.row_factory = sqlite3.Row
     try:
-        row = conn.execute(
-            """
+        row = conn.execute("""
             SELECT enabled, window_seconds, max_requests, downgraded_reasoning_effort
             FROM llm_throttle_policy
             WHERE policy_id = 1
-            """
-        ).fetchone()
+            """).fetchone()
     finally:
         conn.close()
 
@@ -160,8 +157,7 @@ def test_init_db_migrates_legacy_default_policy_row(tmp_path: Path) -> None:
     conn = sqlite3.connect(str(db_path))
     conn.row_factory = sqlite3.Row
     try:
-        conn.execute(
-            """
+        conn.execute("""
             CREATE TABLE llm_throttle_policy (
                 policy_id INTEGER PRIMARY KEY CHECK (policy_id = 1),
                 enabled INTEGER NOT NULL DEFAULT 0,
@@ -170,26 +166,21 @@ def test_init_db_migrates_legacy_default_policy_row(tmp_path: Path) -> None:
                 downgraded_reasoning_effort TEXT NOT NULL DEFAULT 'low',
                 updated_at INTEGER NOT NULL DEFAULT 0
             );
-            """
-        )
-        conn.execute(
-            """
+            """)
+        conn.execute("""
             INSERT INTO llm_throttle_policy
                 (policy_id, enabled, window_seconds, max_requests, downgraded_reasoning_effort, updated_at)
             VALUES
                 (1, 0, 300, 6, 'low', 0)
-            """
-        )
+            """)
 
         background_indexer._init_db(conn)
 
-        row = conn.execute(
-            """
+        row = conn.execute("""
             SELECT enabled, window_seconds, max_requests, downgraded_reasoning_effort, updated_at
             FROM llm_throttle_policy
             WHERE policy_id = 1
-            """
-        ).fetchone()
+            """).fetchone()
     finally:
         conn.close()
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import csv
 import io
 import json
@@ -283,8 +284,8 @@ def fetch_english_transcript(
             "origin_lang": "en",
             "origin_type": None,
         }
-    except no_transcript_exc:
-        pass
+    except no_transcript_exc as exc:
+        missing_transcript = exc
 
     tlist = api.list(video_id)
     items = [t for t in tlist if _is_transcript_item(t)]
@@ -299,7 +300,9 @@ def fetch_english_transcript(
             "origin_type": "auto" if t.is_generated else "manual",
         }
 
-    raise no_transcript_exc("No transcript translatable to English was found.")
+    # The library exception carries the video, requested languages and transcript list.
+    # Reuse it rather than guessing its constructor signature.
+    raise missing_transcript
 
 
 def _expect_dict(value: JSON) -> JSONDict:
@@ -336,7 +339,11 @@ async def get_youtube_transcript(opts: JSON) -> JSONDict:
     api = _build_api(YouTubeTranscriptApi, opts_dict)
 
     try:
-        segments, meta = fetch_english_transcript(api, video_id, preserve_formatting, NoTranscriptFound)
+        segments, meta = await asyncio.to_thread(
+            fetch_english_transcript, api, video_id, preserve_formatting, NoTranscriptFound
+        )
+    except NoTranscriptFound:
+        return {"video_id": video_id, "error": "No English or English-translatable transcript is available."}
     except (TranscriptsDisabled, AgeRestricted) as exc:
         raise RuntimeError("Transcripts are unavailable for this video (disabled or age-restricted).") from exc
     except (RequestBlocked, IpBlocked) as exc:

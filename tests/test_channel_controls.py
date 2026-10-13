@@ -92,6 +92,63 @@ def seed(ctx: GlobalContext) -> None:
                     insert(conn, "topic_notification_cooldowns", {"channel_id": channel_id, "user_id": "42"})
 
 
+def test_policy_refresh_keeps_loaded_channels_available(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def run() -> None:
+        ctx = context(tmp_path)
+        seed(ctx)
+        await channel_controls.load(ctx)
+        await channel_controls.disable(ctx, "11", "1")
+        started, release = threading.Event(), threading.Event()
+        original_connect = database.connect
+
+        def blocked_connect(
+            path: str | Path, timeout: float = 5.0, *, key_file: Path | None = None
+        ) -> database.Connection:
+            started.set()
+            if not release.wait(5):
+                raise TimeoutError("test did not release policy refresh")
+            return original_connect(path, timeout, key_file=key_file)
+
+        monkeypatch.setattr(database, "connect", blocked_connect)
+        refresh = asyncio.create_task(channel_controls.load(ctx))
+        try:
+            assert await asyncio.to_thread(started.wait, 5)
+            assert channel_controls.is_allowed(ctx, "10", "1")
+            assert not channel_controls.is_allowed(ctx, "11", "1")
+        finally:
+            release.set()
+            await refresh
+        assert channel_controls.is_allowed(ctx, "10", "1")
+        assert not channel_controls.is_allowed(ctx, "11", "1")
+
+    asyncio.run(run())
+
+
+def test_failed_policy_refresh_pauses_server_processing_until_recovered(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def run() -> None:
+        ctx = context(tmp_path)
+        seed(ctx)
+        await channel_controls.load(ctx)
+        original_connect = database.connect
+
+        def fail_connect(
+            path: str | Path, timeout: float = 5.0, *, key_file: Path | None = None
+        ) -> database.Connection:
+            raise OSError("injected policy storage failure")
+
+        monkeypatch.setattr(database, "connect", fail_connect)
+        with pytest.raises(OSError, match="policy storage failure"):
+            await channel_controls.load(ctx)
+        assert not channel_controls.is_allowed(ctx, "10", "1")
+        monkeypatch.setattr(database, "connect", original_connect)
+        await channel_controls.load(ctx)
+        assert channel_controls.is_allowed(ctx, "10", "1")
+
+    asyncio.run(run())
+
+
 def test_existing_and_new_channels_and_threads_are_enabled_without_overrides(tmp_path: Path) -> None:
     ctx = context(tmp_path)
     seed(ctx)
@@ -259,11 +316,15 @@ def test_background_pickers_skip_disabled_channels_and_admit_default_enabled_cha
             background_indexer._pick_channel_state_tail,
             background_indexer._pick_channel_state_search,
         ):
-            assert picker(conn, 1)["channel_id"] == "20"
-        assert background_indexer._pick_channel_state_pins(conn, 1, 1)["channel_id"] == "20"
-        assert background_indexer._pick_guild_state(conn, 1)["guild_id"] == "1"
-        assert background_indexer._pick_guild_state(conn, None)["guild_id"] == "1"
-        assert background_indexer._pick_thread_parent_state(conn)["parent_channel_id"] == "20"
+            row = picker(conn, 1)
+            assert row is not None and row["channel_id"] == "20"
+        for row, key, expected in (
+            (background_indexer._pick_channel_state_pins(conn, 1, 1), "channel_id", "20"),
+            (background_indexer._pick_guild_state(conn, 1), "guild_id", "1"),
+            (background_indexer._pick_guild_state(conn, None), "guild_id", "1"),
+            (background_indexer._pick_thread_parent_state(conn), "parent_channel_id", "20"),
+        ):
+            assert row is not None and row[key] == expected
 
 
 def test_disabled_create_edit_and_search_payloads_do_not_enter_index(
@@ -280,7 +341,9 @@ def test_disabled_create_edit_and_search_payloads_do_not_enter_index(
 
     async def run() -> None:
         await background_indexer.record_message_create(ctx, message)
-        await background_indexer.record_message_edit(ctx, SimpleNamespace(channel_id=10, guild_id=1))
+        await background_indexer.record_message_edit(
+            ctx, MagicMock(spec=discord.RawMessageUpdateEvent, channel_id=10, guild_id=1)
+        )
         result = await background_indexer._index_message_payloads(
             ctx, [{"channel_id": "10", "guild_id": "1", "content": "disabled"}], channel_id="10", guild_id="1"
         )
@@ -318,13 +381,24 @@ def commands(ctx: GlobalContext) -> app_commands.Group:
     return group
 
 
+async def invoke_command(ctx: GlobalContext, item: discord.Interaction, name: str, *, channel: bool = True) -> None:
+    group = commands(ctx)
+    if channel:
+        subgroup = group.get_command("channel")
+        assert isinstance(subgroup, app_commands.Group)
+        group = subgroup
+    command = group.get_command(name)
+    assert isinstance(command, app_commands.Command)
+    # discord.py's callback type also permits bound Group methods; these are free callbacks.
+    callback = getattr(command, "callback")
+    await callback(item)
+
+
 @pytest.mark.parametrize("operation", ["enable", "disable", "status"])
 def test_channel_commands_deny_members_without_moderation_permissions(tmp_path: Path, operation: str) -> None:
     ctx = context(tmp_path)
     item = interaction(ctx, moderator=False)
-    group = commands(ctx).get_command("channel")
-    command = group.get_command(operation)
-    asyncio.run(command.callback(item))
+    asyncio.run(invoke_command(ctx, item, operation))
     item.channel.send.assert_not_called()
     assert "permission is required" in item.followup.send.call_args.args[0]
     assert not ctx.channel_controls.disabled
@@ -334,9 +408,8 @@ def test_enable_resumes_privately_without_posting_a_public_notice(tmp_path: Path
     ctx = context(tmp_path)
     item = interaction(ctx)
     ctx.channel_controls.disabled["10"] = "1"
-    command = commands(ctx).get_command("channel").get_command("enable")
     item.channel.send.side_effect = RuntimeError("cannot post public messages")
-    asyncio.run(command.callback(item))
+    asyncio.run(invoke_command(ctx, item, "enable"))
     assert channel_controls.is_allowed(ctx, "10", "1")
     item.channel.send.assert_not_called()
     assert item.followup.send.call_args.kwargs["ephemeral"] is True
@@ -347,7 +420,7 @@ def test_private_disable_confirmation_rechecks_permissions_and_owner(tmp_path: P
     item = interaction(ctx)
 
     async def run() -> None:
-        await commands(ctx).get_command("channel").get_command("disable").callback(item)
+        await invoke_command(ctx, item, "disable")
         assert item.followup.send.call_args.kwargs["ephemeral"] is True
         view = item.followup.send.call_args.kwargs["view"]
         stranger = interaction(ctx)
@@ -364,7 +437,7 @@ def test_privacy_command_is_ephemeral_and_available_to_opted_out_accounts(tmp_pa
     ctx = context(tmp_path)
     item = interaction(ctx, moderator=False)
     ctx.privacy.opted_out_users.add("42")
-    asyncio.run(commands(ctx).get_command("privacy").callback(item))
+    asyncio.run(invoke_command(ctx, item, "privacy", channel=False))
     assert item.response.send_message.call_args.kwargs["ephemeral"] is True
     embed = item.response.send_message.call_args.kwargs["embed"].to_dict()
     text = str(embed)
@@ -380,7 +453,7 @@ def test_confirming_disable_completes_cleanup_and_edits_private_confirmation(tmp
     async def run() -> None:
         await channel_controls.load(ctx)
         await channel_controls.enable(ctx, "10", "1")
-        await commands(ctx).get_command("channel").get_command("disable").callback(item)
+        await invoke_command(ctx, item, "disable")
         view = item.followup.send.call_args.kwargs["view"]
         await view.confirm.callback(item)
         assert not channel_controls.is_allowed(ctx, "10", "1")

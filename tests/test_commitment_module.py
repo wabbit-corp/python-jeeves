@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Wabbit-Public-Test-License-1.1
 import asyncio
 import datetime as dt
 import threading
@@ -601,13 +602,11 @@ def test_commitment_checkin_task_enforces_date_window(
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     try:
-        rows = conn.execute(
-            """
+        rows = conn.execute("""
             SELECT name, status, last_checkin_date
             FROM commitments
             ORDER BY name
-            """
-        ).fetchall()
+            """).fetchall()
     finally:
         conn.close()
 
