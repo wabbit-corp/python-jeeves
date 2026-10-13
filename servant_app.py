@@ -216,13 +216,18 @@ def _build_user_message(content: str) -> ChatCompletionUserMessageParam:
     return {"role": "user", "content": content}
 
 
+def _normalize_discord_mentions(content: str) -> str:
+    """Remove internal display-name labels from Discord user mention tokens."""
+    return re.sub(r"<@!?([0-9]+):[^>\r\n]*>", r"<@\1>", content)
+
+
 def _build_assistant_message(
     content: str | None,
     tool_calls: list[ChatCompletionMessageToolCallUnionParam] | None = None,
 ) -> ChatCompletionAssistantMessageParam:
     message: ChatCompletionAssistantMessageParam = {
         "role": "assistant",
-        "content": content,
+        "content": _normalize_discord_mentions(content) if content is not None else None,
     }
     if tool_calls is not None:
         message["tool_calls"] = tool_calls
@@ -263,7 +268,7 @@ def _user_payload(
     payload: JSONDict = {
         "id": user_id,
         "name": name,
-        "mention": f"<@{user_id}:{name}>",
+        "mention": f"<@{user_id}>",
     }
     if permission_payload is not None:
         payload["permissions"] = permission_payload
@@ -448,6 +453,7 @@ def _is_messageable(channel: object) -> TypeGuard[discord.abc.Messageable]:
 
 
 async def reply(discord_message: Union[discord.Message, "_SyntheticMessage"], content: str) -> None:
+    content = _normalize_discord_mentions(content)
     while True:
         content = content.strip()
         if len(content) == 0:
@@ -513,6 +519,7 @@ async def handle_incoming_message(
                 author always includes id, name, and mention. When known, author.permissions includes booleans staff, admin, and optional global_admin.
                 reply_to, when present, is expanded one level with message_id, author, and content.
                 Messages are passed to and from the users through Discord, so you can use Discord syntax (Markdown + Discord's extensions, e.g. ||<text>|| for hidden text - good for joke punchlines) for formatting.
+                To mention a user in a reply, use <@USER_ID> with only their numeric ID. Never include a username or colon inside the mention token. Incoming content may contain <@USER_ID:username> labels for context; render these as <@USER_ID> in your replies. Names are also provided separately in author.name.
                 Do not end your messages with a question unless it makes sense to do so in the context. You are chatting with people, not interrogating them.
 
                 Don't ever use @here or @everyone mentions.
@@ -1275,7 +1282,7 @@ async def main(*, allow_privileged_intents: bool = True) -> None:
     ctx.discord_client = client
 
     async def _send_long(channel: discord.abc.Messageable, content: str, privacy_generation: int) -> None:
-        content = (content or "").strip()
+        content = _normalize_discord_mentions(content or "").strip()
         while content:
             if ctx.privacy.generation != privacy_generation:
                 return

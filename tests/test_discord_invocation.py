@@ -361,6 +361,30 @@ def test_failed_save_can_be_retried_through_a_new_slash_confirmation(monkeypatch
     asyncio.run(servant_app.main())
 
 
+def test_background_send_normalizes_mentions_in_output_and_context(monkeypatch: pytest.MonkeyPatch) -> None:
+    _prepare_main(monkeypatch)
+    ctx = GlobalContext()
+    ctx.guild_retention.ready.set()
+    ctx.channel_controls.loaded = True
+    monkeypatch.setattr(servant_app, "GlobalContext", lambda: ctx)
+    monkeypatch.setattr(discord.Client, "close", AsyncMock())
+    channel = MagicMock(spec=discord.TextChannel)
+    channel.id = 10
+    channel.guild = SimpleNamespace(id=1)
+    channel.send = AsyncMock()
+
+    async def start(client: discord.Client, _token: str, *, reconnect: bool) -> None:
+        monkeypatch.setattr(client, "wait_until_ready", AsyncMock())
+        monkeypatch.setattr(client, "fetch_channel", AsyncMock(return_value=channel))
+        assert ctx.send_discord_message is not None
+        await ctx.send_discord_message("10", "Yes, <@42:alice>.")
+
+    monkeypatch.setattr(discord.Client, "start", start)
+    asyncio.run(servant_app.main())
+    channel.send.assert_awaited_once_with("Yes, <@42>.")
+    assert ctx.channel_messages["10"][-1]["content"] == "Yes, <@42>."
+
+
 @pytest.mark.parametrize("opt_out_during", ["fetch", "first_chunk"])
 def test_queued_background_send_stops_when_privacy_changes(
     monkeypatch: pytest.MonkeyPatch, opt_out_during: str

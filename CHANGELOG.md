@@ -57,6 +57,7 @@ The entries below are derived from the git history and grouped by release date.
 - Voice transcriber now disconnects after 60 seconds with no non-bot members in the channel.
 - Voice transcription defaults now chunk faster (shorter silence and max segment thresholds).
 ### Fixed
+- Vox replies now use numeric Discord user mentions without internal username suffixes. Author metadata and prompt instructions use the valid syntax, and outgoing replies and cached assistant context normalize legacy labelled mentions before message splitting.
 - Actual Discord mentions now invoke Vox by its account ID, independently of the account or personality name; v/vox aliases remain available across personalities, and failed mention lookups no longer prevent replies.
 - Cross-user commitment lookups now default to the active request channel and reuse the current request guild context, so guild staff/owners can resolve and cancel another user's commitment without redundant channel metadata.
 - Routine tasks now wait for Discord readiness, and dispatch helpers bind the active loop before startup work begins, avoiding first-boot reminder/event task failures during deployment.

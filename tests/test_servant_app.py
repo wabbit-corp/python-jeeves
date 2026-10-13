@@ -56,7 +56,7 @@ def test_build_author_payload_includes_staff_flags_for_member() -> None:
     assert payload == {
         "id": "456",
         "name": "alice",
-        "mention": "<@456:alice>",
+        "mention": "<@456>",
         "permissions": {
             "staff": True,
             "admin": False,
@@ -82,7 +82,7 @@ def test_build_author_payload_uses_cached_guild_member_permissions() -> None:
     assert payload == {
         "id": "789",
         "name": "bob",
-        "mention": "<@789:bob>",
+        "mention": "<@789>",
         "permissions": {
             "staff": True,
             "admin": True,
@@ -99,7 +99,7 @@ def test_build_author_payload_includes_global_admin_without_guild_permissions() 
     assert payload == {
         "id": "123",
         "name": "carol",
-        "mention": "<@123:carol>",
+        "mention": "<@123>",
         "permissions": {
             "staff": True,
             "admin": True,
@@ -129,6 +129,23 @@ def test_flatten_config_values_preserves_top_level_and_dotted_keys() -> None:
     assert flattened["web.fetch"] == {"blocked_hosts": ["example.com"]}
     assert flattened["web.fetch.blocked_hosts"] == ["example.com"]
     assert flattened["admin_user_ids"] == ["123"]
+
+
+@pytest.mark.parametrize(
+    ("content", "expected"),
+    [
+        ("Yes, <@179561959933476864:bigbuxchungus>. You rang?", "Yes, <@179561959933476864>. You rang?"),
+        ("<@!456:alice> and <@789:bob>", "<@456> and <@789>"),
+        ("<@456> <@!789> <@&123> <#123> <:wave:123>", "<@456> <@!789> <@&123> <#123> <:wave:123>"),
+        ("x" * 1988 + " <@456:long_display_name>", "x" * 1988 + " <@456>"),
+    ],
+)
+def test_reply_sends_valid_user_mentions_before_splitting(content: str, expected: str) -> None:
+    channel = Mock()
+    channel.send = AsyncMock()
+    message = servant_app._SyntheticMessage(channel=channel, author=Mock(), message_id=123, content="vox hello")
+    asyncio.run(servant_app.reply(message, content))
+    channel.send.assert_awaited_once_with(expected)
 
 
 def test_handle_incoming_message_uses_supplied_reasoning_effort(monkeypatch: pytest.MonkeyPatch) -> None:
